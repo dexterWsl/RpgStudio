@@ -1,0 +1,19 @@
+# 统一换行：仓库里存 LF，Windows 上检出回 CRLF。
+# .cmd 必须是 CRLF —— 发布包在 Linux 的 CI 上打，检出成 LF 的话，用户下到手的批处理会出问题。
+* text=auto
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.txt text eol=crlf
+
+*.js   text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+
+*.png  binary
+*.jpg  binary
+*.zip  binary

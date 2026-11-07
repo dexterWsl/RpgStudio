@@ -1,0 +1,19 @@
+{
+  "name": "rpgstudio",
+  "version": "2026.11.04",
+  "description": "RPG Maker MZ / MV 的剧情编辑器：看懂剧情结构、改台词、加事件。零依赖，只在本机跑。",
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "bin": { "rpgstudio": "app/studio/server.js" },
+  "scripts": {
+    "start": "node app/studio/server.js",
+    "local": "node app/start.js",
+    "check": "node app/start.js --check",
+    "build": "node tools/build-release.js",
+    "build:lite": "node tools/build-release.js --no-runtime --out dist-lite",
+    "test:roundtrip": "node app/studio/test/roundtrip.js",
+    "test:progress": "node app/studio/test/progress.js"
+  },
+  "files": ["app/", "使用说明.txt", "启动.cmd", "检查环境.cmd"],
+  "keywords": ["rpgmaker", "rpg-maker-mz", "rpg-maker-mv", "editor", "story", "game-data"]
+}

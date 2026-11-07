@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rpgStudio</title>
+<link rel="stylesheet" href="/studio/studio.css">
+</head>
+<body class="project-picker">
+<header>
+  <button id="navToggle" class="quiet small" aria-label="打开目录">目录</button>
+  <a class="brand" href="#/projects"><b>rpg</b>Studio</a>
+  <div class="proj" id="proj"></div>
+  <div class="stagepick" id="stagePick" hidden></div>
+  <div class="search">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg>
+    <input id="q" type="search" placeholder="搜台词、事件名、开关…（按 / 聚焦）" autocomplete="off">
+  </div>
+  <span class="sp"></span>
+  <details class="mmenu playmenu" id="playMenu"><summary title="在浏览器里玩这个游戏（不用装 RPG Maker）">▶ 试玩</summary>
+    <div class="mlist" role="menu"><button type="button" role="menuitem" id="playTitle">从标题画面开始</button><button type="button" role="menuitem" id="playNew">跳过标题，直接开始新游戏</button></div></details>
+  <button id="newSceneBtn" class="primary small">＋ 新建场景</button>
+  <a class="tag" href="#/projects/import">选择游戏 / 导入游戏</a>
+  <button id="setBtn" class="quiet small">工程设置</button>
+  <span id="hostLinks" style="display:contents"></span>
+</header>
+
+<div class="shell noside" id="shell">
+  <nav id="nav" aria-label="目录">
+    <div class="navlinks" id="navlinks">
+      <a href="#/projects" data-k="projects">选择游戏</a>
+      <a href="#/" data-k="home">概览</a>
+      <a href="#/progress" data-k="progress">剧情进度</a>
+      <a href="#/scenes" data-k="scenes">场景</a>
+      <a href="#/gallery" data-k="gallery">回想房</a>
+      <a href="#/names/switch" data-k="switch">开关 <em id="nSw"></em></a>
+      <a href="#/names/var" data-k="var">变量 <em id="nVar"></em></a>
+      <a href="#/people" data-k="people">人物</a>
+      <a href="#/sprites" data-k="sprites">小人库</a>
+      <a href="#/assets" data-k="assets">导入素材</a>
+      <a href="#/tilesets" data-k="tilesets">图块集</a>
+      <a href="#/system" data-k="system">游戏设置</a>
+      <a href="#/check" data-k="check">结构检查</a>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="on" data-tab="maps" role="tab">地图</button>
+      <button data-tab="ces" role="tab">公共事件</button>
+    </div>
+    <div class="navfilter"><input id="navq" type="search" placeholder="筛选" autocomplete="off"></div>
+    <div class="navlist" id="navlist"></div>
+  </nav>
+  <main id="main"><div class="loading">正在读取工程…</div></main>
+  <aside id="side" aria-label="引用"></aside>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/studio/tilemap.js"></script>
+<script src="/studio/js/base.js"></script>
+<script src="/studio/js/shell.js"></script>
+<script src="/studio/js/home.js"></script>
+<script src="/studio/js/map.js"></script>
+<script src="/studio/js/event.js"></script>
+<script src="/studio/js/ce.js"></script>
+<script src="/studio/js/names.js"></script>
+<script src="/studio/js/people.js"></script>
+<script src="/studio/js/sprites.js"></script>
+<script src="/studio/js/gallery.js"></script>
+<script src="/studio/js/search.js"></script>
+<script src="/studio/js/settings.js"></script>
+<script src="/studio/js/progress.js"></script>
+<script src="/studio/js/player.js"></script>
+<script src="/studio/js/scenes.js"></script>
+<script src="/studio/js/projects.js"></script>
+<script src="/studio/js/assets.js"></script>
+<script src="/studio/js/tilesets.js"></script>
+<script src="/studio/js/system.js"></script>
+<script src="/studio/js/main.js"></script>
+</body>
+</html>
