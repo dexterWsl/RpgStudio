@@ -4,6 +4,7 @@
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
 const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js');
 const { TRIGGERS, PRIORITIES, CE_TRIGGERS } = require('../core/commands.js');
+const choicecond = require('../core/choicecond.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -192,6 +193,36 @@ module.exports = function (ctx) {
         const v = T.validator.newProblems(list, merged.list);
         return { ok: true, unchanged: merged.unchanged, outline: T.describer.outline(merged.list), problems: v.fresh, warnings: v.warnings.map(w => w.msg) };
       },
+    // 选项条件（WD_ConditionalChoice 这类）：<<[条件]>> 不满足时锁住、(([条件])) 不满足时不显示
+    //   改写这一条「选了…」，同时改「显示选项」里对应的那一项（游戏里显示的是那一份）
+    'choice/cond'(T, b) {
+      const at = target(b);
+      const line = int(b.line, '第几条不对');
+      // 条件里不能有空格（插件按原文解析），也不能把包装的括号写坏
+      const clean = s => String(s == null ? '' : s).replace(/\s+/g, '').trim();
+      const disable = clean(b.disable);
+      const hide = clean(b.hide);
+      need(disable.length < 200 && hide.length < 200, '条件太长了');
+      T.store.edit([fileOf(at)], docs => {
+        const { holder } = locate(docs, at);
+        const list = holder.list || [];
+        const c = list[line];
+        need(c && c.code === 402, '这一行不是「选了…」');
+        const label = choicecond.join({ disable, hide, text: choicecond.split(String(c.parameters[1] ?? '')).text });
+        c.parameters[1] = label;
+        const idx = Number(c.parameters[0]);
+        for (let i = line - 1; i >= 0; i--) {
+          const x = list[i];
+          if (!x) continue;
+          if (x.code === 102 && (x.indent || 0) === (c.indent || 0)) {
+            const arr = x.parameters && x.parameters[0];
+            if (Array.isArray(arr) && Number.isInteger(idx) && idx >= 0 && arr[idx] != null) arr[idx] = label;
+            break;
+          }
+        }
+      });
+      return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
+    },
     'event/create'(T, b) {
       const mapId = int(b.map, '地图编号不对');
       const x = int(b.x, '坐标不对'), y = int(b.y, '坐标不对');

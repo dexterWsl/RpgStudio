@@ -301,6 +301,8 @@ body>header{flex:none;display:flex;align-items:center;gap:12px;padding:8px 14px;
 .editor .t-pic{color:var(--c-stage)}
 .editor .t-act{color:var(--c-move)}
 .editor .t-keep{color:#9b8f72}
+.editor .t-plugin{color:var(--c-code)}
+.editor .t-cond{color:#e6c27f}
 .editor .t-spk{color:var(--c-say)}
 .editor .t-cont{color:var(--ink3)}
 .editor .t-choice{color:var(--c-flow)}
@@ -711,12 +713,29 @@ dialog footer{display:flex;align-items:center;gap:8px;padding:12px 18px;border-t
 /* 选项旁边的「关联场景」 */
 .sclink{margin-left:10px;background:transparent;border:1px dashed #3a4558;border-radius:999px;padding:0 9px;font-size:11.5px;line-height:1.7;color:var(--ink2);vertical-align:middle}
 .sclink:hover{color:#bfe0fb;border-color:var(--acc);background:transparent}
+/* 选项条件：<<[..]>> 锁住 / (([..])) 不显示 */
+.cndbtn{margin-left:8px;background:transparent;border:1px dashed #3a4558;border-radius:999px;padding:0 9px;font-size:11.5px;line-height:1.7;color:var(--ink2);vertical-align:middle}
+.cndbtn:hover{color:#bfe0fb;border-color:var(--acc)}
+.cndbtn.on{color:#e6c27f;border-style:solid;border-color:#6b5a33;background:rgba(230,194,127,.08)}
+.cndtxt{margin-left:8px;font-size:11.5px;color:#c8b184;vertical-align:middle}
+.ccrows{display:flex;flex-direction:column;gap:6px}
+.ccrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ccrow .cct{flex:none;width:48px;font-size:12px;color:var(--ink3)}
+.ccrow select,.ccrow input{min-width:0}
+.ccrow input{flex:1}
 /* 新建场景弹窗 */
 .scdlg textarea{width:100%;min-height:180px;resize:vertical;font-family:inherit;line-height:1.6}
 .scchips{display:flex;flex-wrap:wrap;gap:5px}
 .scchips button{border-radius:999px}
 .scchips button.on{border-color:var(--acc);background:#1c2633;color:#bfe0fb}
 .scchips.sctools{margin-top:-2px}
+/* 传送：在地图上点格子 */
+.tpbox{margin-top:10px}
+.mpkwrap{max-height:56vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#080b10;padding:8px;display:flex;justify-content:center}
+.mpkstack{position:relative}
+.mpkstack canvas{position:absolute;left:0;top:0;display:block;image-rendering:pixelated}
+.mpk{cursor:crosshair}
+.mpkover{pointer-events:none}
 .insgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:min(300px,38vh);overflow:auto}
 .insgrid button{text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:12.5px}
 .picture-picker{display:flex;flex-direction:column;gap:8px;min-width:0}

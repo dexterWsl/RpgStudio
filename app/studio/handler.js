@@ -26,6 +26,7 @@ const { createRegistry } = require('./core/projects.js');
 const { createProgress } = require('./core/progress.js');
 const { createScenes } = require('./core/scenes.js');
 const { createPlayer } = require('./core/play.js');
+const { createPluginArgs } = require('./core/pluginargs.js');
 const { createPlaytest } = require('./core/playtest.js');
 const stagePlugin = require('./core/stage.js');
 const { UserError, need } = require('./lib/util.js');
@@ -95,10 +96,13 @@ function createStudio(opts) {
   // ---------- 工具（每次请求现组装：数据目录可能已经换成另一个用户的工作区） ----------
   function tools() {
     const prof = profile();
-    const pics = pictureRules(picOptions());
     const nameBox = project.engine().name !== 'MV';
+    // 插件指令（#插件）：参数表从 js/plugins 里的插件文件读
+    const pluginArgs = createPluginArgs(project, { mz: nameBox });
+    const isPluginCmd = c => pluginArgs.can(c);
+    const pics = pictureRules({ ...picOptions(), isPlugin: isPluginCmd });
     const describer = createDescriber(project, { isClearAll: pics.isClearAll });
-    const script = createScript(project, { pics, nameBox, engine: project.engine().name, picSize: n => project.imageSize('pictures', n) });
+    const script = createScript(project, { pics, nameBox, engine: project.engine().name, picSize: n => project.imageSize('pictures', n), pluginArgs });
     const style = project.messageStyle();
     const anchorText = (c, cmds) => {
       const p = c.parameters || [];
@@ -122,7 +126,7 @@ function createStudio(opts) {
       return describer.describe(c);
     };
     const merger = createMerger({
-      pics, nameBox,
+      pics, nameBox, isPluginCmd,
       actorName: s => project.expandN(s),
       actorIdByName: project.actorIdByName,
       refText: script.refText,

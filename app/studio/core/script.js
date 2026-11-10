@@ -36,6 +36,8 @@
 //   #镜头 方向 格数 [速度]   镜头平移（上下左右，速度 1~6，默认 3），移完再往下
 //   #天气 雨|暴雨|雪|无 [强度] [秒]
 //   #闪光 [白|红] [秒]
+//   #插件 插件名 指令名（值1，值2…）  直接写插件指令（MZ 的 357）：参数按插件里的顺序，没写的用插件里的默认值
+//                           例：#插件 VisuMZ_2_VNPictureBusts Basic_ExitBusts（["50"]，-200）
 const { newPicState } = require('./merge.js');
 const stage = require('./stage.js');
 
@@ -83,6 +85,8 @@ function createScript(project, opts = {}) {
   const bustSlotOf = (slots, who) => [...slots.entries()].find(([, v]) => { const b = parseBustName(v); return b && b.who === who; });
   const isBustId = id => id >= pics.max - 2 && id <= pics.max;
   const mz = opts.engine !== 'MV';
+  // 插件指令（#插件）：参数表从 js/plugins/<插件名>.js 读；没有就写不了
+  const pa = opts.pluginArgs || null;
 
   // 名字 → 编号：完全一致优先；只有一个包含它的也算
   function resolveRef(raw, kind) {
@@ -156,6 +160,12 @@ function createScript(project, opts = {}) {
       if (ub) return { type: 'unbust', who: ub[1] || '' };
       const call = /^[#＃]\s*场景[\s:：]+(.+)$/.exec(line);
       if (call) return { type: 'call', id: resolveRef(call[1], 'ce'), ref: call[1].trim() };
+      // #插件 插件名 指令名（值1，值2…）：参数表从插件文件读，生成 357 + 657 续行
+      const pl = /^[#＃]\s*插件\s*[:：]?\s*(\S+)\s+([^\s（(]+)\s*([\s\S]*)$/.exec(line);
+      if (pl) {
+        if (!pa) throw new Error('这个工程没有读插件参数表，写不了「#插件」（要 js/plugins 里的插件文件）');
+        return pa.item(pl[1], pl[2], pl[3]);
+      }
       const wk = /^[#＃]\s*行走图[\s:：]+(\S+)\s+(\S+)(?:\s+(\d))?$/.exec(line);
       if (wk) return { type: 'look', actor: resolveRef(wk[1], 'actor'), sheet: wk[2], index: wk[3] ? Number(wk[3]) : 0 };
       if (/^[#＃]\s*消失$/.test(line)) return { type: 'erase' };
@@ -302,6 +312,7 @@ function createScript(project, opts = {}) {
       case 'transparent': return [{ code: 211, indent: 0, parameters: [it.on ? 0 : 1] }];
       case 'erase': return [{ code: 214, indent: 0, parameters: [] }];
       case 'title': return [{ code: 354, indent: 0, parameters: [] }];
+      case 'plugin': return pa ? pa.commandsOf(it) : null;
       case 'camera': return [{ code: 204, indent: 0, parameters: [it.dir, Math.max(1, it.dist), it.speed, true] }];
       case 'weather': return [{ code: 236, indent: 0, parameters: [it.weather, it.power, Math.max(0, Math.round(it.sec * 60)), false] }];
       case 'flash': return [{ code: 224, indent: 0, parameters: [FLASHES[it.color].slice(), Math.max(1, Math.round(it.sec * 60)), false] }];
@@ -397,7 +408,9 @@ function createScript(project, opts = {}) {
         return '#天气 ' + t + (Number(p[1]) !== defPow || sec ? ' ' + p[1] : '') + sec;
       }
       case 224: { const n = flashName(p[0]); return n && !p[2] ? '#闪光' + (n === '白' && Number(p[1]) === 30 ? '' : ' ' + n + (Number(p[1]) === 30 ? '' : ' ' + secText(p[1]))) : ''; }
-      case 356: case 357: return stageLine(c);
+      case 356: return stageLine(c);
+      // 插件指令：演出插件（#飘字 #动作）优先，其它插件看参数表能不能把这一条写回来
+      case 357: return stageLine(c) || (pa ? pa.lineOf(c) : '');
       case 123: return ['A', 'B', 'C', 'D'].includes(p[0]) ? '#独立开关 ' + p[0] + ' ' + (p[1] === 0 ? '开' : '关') : '';
       case 322: { const a = (P.read('Actors.json') || [])[p[0]] || {}; return a.name && p[3] === (a.faceName || '') && p[4] === (a.faceIndex || 0) && p[5] === (a.battlerName || '') ? '#行走图 ' + refText('actor', p[0]) + ' ' + p[1] + (p[2] ? ' ' + p[2] : '') : ''; }
       case 231: {

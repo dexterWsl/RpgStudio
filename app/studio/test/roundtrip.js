@@ -20,7 +20,7 @@ const T = studio.tools();
 const { stripBar } = require('../core/merge.js');
 
 const J = x => JSON.stringify(x.map(c => [c.code, c.indent, c.parameters]));
-const stat = { lists: 0, withText: 0, editable: 0, edit: 0, del: 0, guard: 0, 改选项: 0, 加选项: 0, 删选项: 0 };
+const stat = { lists: 0, withText: 0, editable: 0, edit: 0, del: 0, guard: 0, 插件: 0, 改选项: 0, 加选项: 0, 删选项: 0 };
 const fails = [], reasons = {};
 const fail = (w, m) => fails.push(w + '：' + m);
 
@@ -57,6 +57,28 @@ T.xref.each((at, list) => {
   if (a >= 0) {
     const t = lines.slice(); t[a] += '改';
     try { run(t.join('\n')); fail(where, '改了 ■ 结构行居然没报错'); } catch { stat.guard++; }
+  }
+  // 插件指令（#插件）：照着抄一行到下面，生成的必须正好多出一条一模一样的指令（含续行）
+  const pl = lines.findIndex(l => stripBar(l).trim().startsWith('#插件 '));
+  if (pl >= 0) {
+    const t = lines.slice();
+    t.splice(pl + 1, 0, lines[pl]);
+    try {
+      const r = run(t.join('\n'));
+      const it = (T.script.parseScript(stripBar(lines[pl]).trim()) || [])[0];
+      const block = it ? T.script.stagingCommand(it) || [] : [];
+      const key = c => JSON.stringify([c.code, c.parameters]);
+      const count = arr => { const m = new Map(); for (const c of arr) m.set(key(c), (m.get(key(c)) || 0) + 1); return m; };
+      const before = count(list), after = count(r.list);
+      const extra = block.map(key);
+      const same = before.size && [...after].every(([k, n]) => n - (before.get(k) || 0) === extra.filter(x => x === k).length)
+        && [...before].every(([k]) => after.has(k));
+      const v = T.validator.newProblems(list, r.list);
+      if (!block.length) fail(where, '复制 #插件 行：这条指令生成不出来');
+      else if (v.fresh.length) fail(where, '复制 #插件 行后出现新问题：' + v.fresh[0].msg);
+      else if (r.list.length !== list.length + block.length || !same) fail(where, '复制 #插件 行：生成的不一样');
+      else stat.插件++;
+    } catch (e) { fail(where, '复制 #插件 行报错：' + e.message); }
   }
   // 选项：改字 / 加一个 / 删一个（第一个「显示选项」）
   const s = l => stripBar(l).trim();
@@ -118,7 +140,7 @@ T.xref.each((at, list) => {
 });
 
 console.log(`${T.prof.label}配置 · 共 ${stat.lists} 页，有台词/图 ${stat.withText}，能整页编辑 ${stat.editable}`);
-console.log(`  改一句 ${stat.edit} ✓  删一句 ${stat.del} ✓  结构行保护 ${stat.guard} ✓`);
+console.log(`  改一句 ${stat.edit} ✓  删一句 ${stat.del} ✓  结构行保护 ${stat.guard} ✓  插件指令 ${stat.插件} ✓`);
 console.log(`  改选项 ${stat.改选项} ✓  加选项 ${stat.加选项} ✓  删选项 ${stat.删选项} ✓`);
 for (const [r, n] of Object.entries(reasons)) console.log(`  不能编辑（${n}）：${r}`);
 if (fails.length) { console.log('失败 ' + fails.length + '：'); fails.slice(0, 30).forEach(f => console.log('  ✖ ' + f)); process.exit(1); }

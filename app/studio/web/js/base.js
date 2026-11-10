@@ -78,10 +78,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $$('.mmenu[o
 // ---------- 弹窗 ----------
 function openDialog(html, onReady) {
   const d = $('#dlg');
+  // 一个接一个地开（先选地图、再填坐标）：上一个的 close 事件是异步来的，
+  // 开新的时它可能才刚到，所以按「第几次开」认领，别把新的那个当成关掉了
+  const gen = d._gen = (d._gen || 0) + 1;
   d.innerHTML = html;
+  d.onkeydown = null;
   return new Promise(resolve => {
-    const done = v => { if (d.open) d.close(); resolve(v); };
-    d.onclose = () => resolve(undefined);
+    const done = v => { if (d._gen !== gen) return; if (d.open) d.close(); resolve(v); };
+    d.addEventListener('close', () => { if (d._gen === gen) resolve(undefined); }, { once: true });
     d.onclick = e => { if (e.target === d) done(undefined); };
     d.showModal();
     onReady(d, done);
@@ -168,18 +172,121 @@ async function pickDialog(title, path, isImage = false) {
         mountPicturePicker($('.picture-picker', d), names, done);
       });
   }
+  return chooseDialog(title, names);
+}
+
+// 从一串名字里挑一个（角色名、事件名、固定的几个选项都行）：和 pickDialog 一样的选择界面，只是不问服务器
+function chooseDialog(title, names) {
+  const all = (names || []).filter(Boolean).map(String);
   return openDialog(`<header><h3>${esc(title)}</h3><button class="quiet small" data-x>关闭</button></header>
-    <div class="dbody"><input id="pq" placeholder="筛选（共 ${names.length} 个）"><div id="pl" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:50vh;overflow:auto"></div></div>`,
+    <div class="dbody"><input id="cq" placeholder="筛选（共 ${all.length} 个）"><div id="cl" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:50vh;overflow:auto"></div></div>`,
     (d, done) => {
       const draw = q => {
-        const list = names.filter(n => !q || n.toLowerCase().includes(q)).slice(0, 240);
-        $('#pl', d).innerHTML = list.map(n => `<button data-n="${esc(n)}" style="text-align:left;white-space:normal;overflow-wrap:anywhere">${esc(n)}</button>`).join('') || '<div class="dim">没有符合的</div>';
-        $$('[data-n]', d).forEach(b => b.onclick = () => done(b.dataset.n));
+        const list = all.filter(n => !q || n.toLowerCase().includes(q)).slice(0, 240);
+        $('#cl', d).innerHTML = list.map(n => `<button data-c="${esc(n)}" style="text-align:left;white-space:normal;overflow-wrap:anywhere">${esc(n)}</button>`).join('') || '<div class="dim">没有符合的</div>';
+        $$('[data-c]', d).forEach(b => b.onclick = () => done(b.dataset.c));
       };
-      $('#pq', d).oninput = e => draw(e.target.value.trim().toLowerCase());
+      $('#cq', d).oninput = e => draw(e.target.value.trim().toLowerCase());
       $('[data-x]', d).onclick = () => done(null);
-      draw(''); $('#pq', d).focus();
+      draw(''); $('#cq', d).focus();
     }).then(v => v || null);
+}
+
+// 把一张地图画进指定的框里：点一下拿格子坐标（传送选目的地用）
+//   和地图页同一套画法（TM.drawSpot + 图块集），事件画成小方框，鼠标跟着走
+async function mountMapPicker(box, mapId, onPick) {
+  box.innerHTML = '<div class="loading">正在读取地图…</div>';
+  const [m, tiles] = await Promise.all([api('map?id=' + mapId), api('maptiles?id=' + mapId)]);
+  const names = (tiles.tileset && tiles.tileset.names) || [];
+  const sheets = await Promise.all(names.map(loadTileSheet));
+  const w = m.width, h = m.height;
+  const data = tiles.data.slice(0, w * h * 6);
+  while (data.length < w * h * 6) data.push(0);
+  const flags = (tiles.tileset && tiles.tileset.flags) || [];
+  const C = Math.max(8, Math.min(28, Math.floor(720 / Math.max(w, h))));
+  const W = w * C, H = h * C;
+  box.innerHTML = `<div class="mpkwrap"><div class="mpkstack" style="width:${W}px;height:${H}px">
+      <canvas class="mpk" width="${W}" height="${H}"></canvas><canvas class="mpkover" width="${W}" height="${H}"></canvas>
+    </div></div>`;
+  const cv = $('.mpk', box), ov = $('.mpkover', box);
+  const ctx = cv.getContext('2d'), octx = ov.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = x * C, dy = y * C;
+    ctx.fillStyle = '#080b10'; ctx.fillRect(dx, dy, C, C);
+    TM.drawSpot(ctx, sheets, flags, data, w, h, x, y, dx, dy, C);
+  }
+  let cur = null, hov = null;
+  const paint = () => {
+    octx.clearRect(0, 0, W, H);
+    for (const e of (m.events || [])) {
+      if (!e) continue;
+      octx.strokeStyle = 'rgba(255,190,90,.55)'; octx.lineWidth = 1;
+      octx.strokeRect(e.x * C + 1.5, e.y * C + 1.5, Math.max(1, C - 3), Math.max(1, C - 3));
+    }
+    if (hov) { octx.fillStyle = 'rgba(141,156,245,.16)'; octx.fillRect(hov.x * C, hov.y * C, C, C); }
+    if (cur) {
+      octx.fillStyle = 'rgba(141,156,245,.34)'; octx.fillRect(cur.x * C, cur.y * C, C, C);
+      octx.strokeStyle = '#8d9cf5'; octx.lineWidth = 2; octx.strokeRect(cur.x * C + 1, cur.y * C + 1, C - 2, C - 2);
+    }
+  };
+  paint();
+  const at = e => {
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / (r.width / w)), y = Math.floor((e.clientY - r.top) / (r.height / h));
+    return x >= 0 && y >= 0 && x < w && y < h ? { x, y } : null;
+  };
+  cv.onmousemove = e => { hov = at(e); paint(); };
+  cv.onmouseleave = () => { hov = null; paint(); };
+  cv.onclick = e => { const c = at(e); if (!c) return; cur = c; paint(); onPick(c, false); };
+  cv.ondblclick = e => { const c = at(e); if (!c) return; cur = c; paint(); onPick(c, true); };
+}
+
+// 传送：挑地图（默认就是这张图），直接在地图上点要去的格子 → { id, name, x, y }
+async function transferDialog(defaultMapId) {
+  const maps = await lookup('map').catch(() => []);
+  if (!maps.length) { toast('这个工程里还没有地图', true); return null; }
+  let mapId = Number(defaultMapId) || 0;
+  if (!maps.some(m => m.id === mapId)) mapId = maps[0].id;
+  let picked = null, name = (maps.find(m => m.id === mapId) || {}).name || '';
+  return openDialog(`<header><h3>传送到哪里</h3><button class="quiet small" data-x>关闭</button></header>
+    <div class="dbody">
+      <div class="fgrid"><label for="tpmap">地图</label><select id="tpmap">${maps.map(m => `<option value="${m.id}" ${m.id === mapId ? 'selected' : ''}>${m.id} ${esc(m.name || '（没名字）')}</option>`).join('')}</select></div>
+      <div class="tpbox" id="tpbox"></div>
+    </div>
+    <footer><span class="sp"></span><span class="dim" id="tphint">在地图上点一下要去的格子</span><button data-x>取消</button><button class="primary" data-ok disabled>就是这一格</button></footer>`,
+    (d, done) => {
+      d.classList.add('dlg-wide');
+      d.addEventListener('close', () => d.classList.remove('dlg-wide'), { once: true });
+      const sel = $('#tpmap', d), box = $('#tpbox', d), ok = $('[data-ok]', d), hint = $('#tphint', d);
+      $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
+      const fire = () => { if (picked) done({ id: mapId, name, x: picked.x, y: picked.y }); };
+      ok.onclick = fire;
+      const load = async () => {
+        mapId = Number(sel.value);
+        name = (maps.find(m => m.id === mapId) || {}).name || '';
+        picked = null; ok.disabled = true; hint.textContent = '在地图上点一下要去的格子';
+        try {
+          await mountMapPicker(box, mapId, (c, dbl) => {
+            picked = c; ok.disabled = false;
+            hint.textContent = (name || '地图 ' + mapId) + ' (' + c.x + ', ' + c.y + ')';
+            if (dbl) fire();
+          });
+        } catch (e) { box.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+      };
+      sel.onchange = load;
+      load();
+    }).then(v => v || null);
+}
+
+// 谁：主角 / 本事件 /（飘字还有画面）/ 人物 / 手动输入
+async function whoDialog(title, extra = []) {
+  const actors = await lookup('actor').then(rows => rows.map(a => a.name).filter(Boolean)).catch(() => []);
+  const MANUAL = '（手动输入…）';
+  const pick = await chooseDialog(title, [...extra, '主角', '本事件', ...actors, MANUAL]);
+  if (!pick) return null;
+  if (pick !== MANUAL) return pick;
+  return promptDialog(title, '名字（角色名 / 地图上事件的名字）', '');
 }
 async function lookup(kind) {
   if (!S.lookups[kind]) S.lookups[kind] = api('lookup?kind=' + kind).then(r => r.rows);

@@ -32,11 +32,14 @@ async function sceneDialog(opts = {}, st = null) {
           <div class="fgrid"><label for="scName">名字</label><input id="scName" maxlength="40" placeholder="比如：图书馆的夜谈" value="${esc(st.name)}"></div>
           <div class="csec"><span class="csec-t">谁说什么</span><span class="faint">点名字插一句「名字：」；一行一句「名字：台词」，「#选项 去 | 不去」下面每行用 #1 #2 开头</span></div>
           <div class="scchips scpeople">${actors.map(a => `<button type="button" class="small" data-sa="${esc(a.name)}">${esc(a.name)}</button>`).join('')}</div>
-          <div class="csec"><span class="csec-t">插点别的</span><span class="faint">不占对话框，插在要发生的位置；「#清图」关掉还在显示的 CG</span></div>
+          <div class="csec"><span class="csec-t">插点别的</span><span class="faint">不占对话框，插在要发生的位置：传送、飘字、动作（移动路线写「动作 本事件 下3 左2」）、关掉还在显示的 CG</span></div>
           <div class="scchips sctools">
             <button type="button" class="small" id="scPicBtn" data-ins="pic" aria-expanded="false">插入 CG…</button>
             <button type="button" class="small" id="scItemBtn" data-ins="item" aria-expanded="false">插入物品…</button>
             <button type="button" class="small" id="scVarBtn" data-ins="var" aria-expanded="false">插入变量…</button>
+            <button type="button" class="small" data-ins2="tp">插入传送…</button>
+            <button type="button" class="small" data-ins2="float">插飘字…</button>
+            <button type="button" class="small" data-ins2="act">插动作…</button>
             <button type="button" class="small" data-sins="#清图">#清图</button>
           </div>
           <div id="scPics" class="picture-picker scpics" hidden></div>
@@ -91,6 +94,14 @@ async function sceneDialog(opts = {}, st = null) {
       if (ta) {
         $$('[data-sa]', d).forEach(b => b.onclick = () => insert(b.dataset.sa + '：'));
         $$('[data-sins]', d).forEach(b => b.onclick = () => insert(b.dataset.sins + '\n'));
+        // 传送 / 飘字 / 动作（移动路线也写「动作 本事件 下3 左2」）
+        $$('[data-ins2]', d).forEach(b => b.onclick = async () => {
+          const kind = b.dataset.ins2;
+          if (kind === 'tp') { const t = await transferDialog(p ? p.map : 0); if (t) insert('#传送 ' + t.name + ' ' + t.x + ' ' + t.y + '\n'); return; }
+          const who = await whoDialog(kind === 'float' ? '飘字：字从谁头上冒出来' : '动作 / 移动路线：谁动', kind === 'float' ? ['画面'] : []);
+          if (!who) return;
+          insert(kind === 'float' ? '#飘字 ' + who + '：' : '#动作 ' + who + ' \n');
+        });
         // 插入工具（CG / 物品 / 变量）共用下面这块选择区：点一下展开，选完插到光标处，再点一次收起
         const pickBox = $('#scPics', d);
         let pickKind = '';

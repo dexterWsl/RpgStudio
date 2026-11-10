@@ -32,6 +32,7 @@ const category = code => CAT_OF.get(code) || 'system';
 const CONT_OF = { 401: 101, 405: 105, 408: 108, 655: 355, 657: 357, 505: 205, 605: 302 };
 
 const { createTextCodes } = require('./textcodes.js');
+const choicecond = require('./choicecond.js');
 
 function createDescriber(project, opts = {}) {
   const codes = createTextCodes(project);
@@ -87,7 +88,8 @@ function createDescriber(project, opts = {}) {
       case 101: return '对话框' + (p[4] ? '｜' + P.expandN(p[4]) : '') + (p[0] ? `（头像 ${p[0]} #${p[1]}）` : '');
       case 401: return P.expandN(p[0]);
       case 102: return '选项：' + (p[0] || []).map(P.expandN).join(' / ');
-      case 402: return '选了「' + P.expandN(p[1] ?? '') + '」';
+      // 选项文字前面可能挂着插件条件（<<[..]>> / (([..]))）：阅读视图里条件单独显示，文字只留选项本身
+      case 402: return '选了「' + P.expandN(choicecond.split(p[1] ?? '').text.trim()) + '」';
       case 403: return '按取消时';
       case 404: return '选项结束';
       case 103: return `输入数字（${p[1]} 位）→ ${L('var', p[0])}`;
@@ -284,6 +286,15 @@ function createDescriber(project, opts = {}) {
         rows.push(row); i = j - 1; continue;
       }
       row.text = describe(c);
+      if (c.code === 402) {
+        const cc = choicecond.split(p[1] ?? '');
+        row.label = cc.text;
+        if (cc.disable || cc.hide) {
+          row.cond = { disable: cc.disable, hide: cc.hide };
+          const nm = (kind, id) => { try { return P.name(kind, id); } catch { return ''; } };
+          row.condText = [cc.disable ? choicecond.describe(cc.disable, nm) : '', cc.hide ? choicecond.describe(cc.hide, nm) : ''].filter(Boolean).join('；');
+        }
+      }
       const refs = refsOf(c);
       if (refs.length) row.refs = refs;
       if (c.code === 0) row.text = '';   // 分支内部的结束标记：只占缩进，不显示文字

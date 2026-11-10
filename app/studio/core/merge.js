@@ -84,8 +84,19 @@ function pictureRules(opts = {}) {
     if (id > max) throw new Error(`同时叠着的图太多了（最多 ${max - min + 1} 张），先用 #清图 关掉一些`);
     return id;
   };
+  // 插件指令（#插件 写得出来的）：357 连同后面的 657 续行算一条，跟演出插件一个待遇
+  const isPlugin = opts.isPlugin || (() => false);
+  const pluginAt = (list, i) => {
+    const c = list[i];
+    if (!c) return false;
+    if (c.code === 357) return !!isPlugin(c);
+    if (c.code !== 657) return false;
+    let k = i - 1;
+    while (k >= 0 && list[k].code === 657) k--;
+    return k >= 0 && list[k].code === 357 && !!isPlugin(list[k]);
+  };
   // 这一条能不能放进编辑框（脚本只认「关闭全部图片」这一句，而且后面没有续行）
-  const editableAt = (list, i) => !!list[i] && (EDITABLE.has(list[i].code) || stageAt(list, i) || (isClearAll(list[i]) && !(list[i + 1] && list[i + 1].code === 655)));
+  const editableAt = (list, i) => !!list[i] && (EDITABLE.has(list[i].code) || stageAt(list, i) || pluginAt(list, i) || (isClearAll(list[i]) && !(list[i + 1] && list[i + 1].code === 655)));
   const picApply = (st, c) => {
     if (!c) return;
     if (c.code === 231) { st.slots.set(c.parameters[0], c.parameters[1]); st.last = c.parameters[0]; st.shows.push({ id: c.parameters[0], name: c.parameters[1] }); }
@@ -177,7 +188,7 @@ function createMerger(ctx) {
   const OTHER_KIND = { 231: 'pic', 235: 'clear', 355: 'clear', 230: 'wait', 121: 'switch', 122: 'var', 126: 'item', 201: 'transfer',
     221: 'fade', 222: 'fade', 223: 'tint', 225: 'shake', 241: 'bgm', 242: 'bgm', 245: 'bgs', 246: 'bgs', 250: 'se', 213: 'balloon', 117: 'call', 211: 'transparent', 322: 'look', 214: 'erase', 123: 'selfsw', 354: 'title',
     204: 'camera', 224: 'flash', 236: 'weather' };
-  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'act']);
+  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'act', 'plugin']);
 
   // 一条非台词指令在编辑框里的那一行；确认「这一行再解析回去」能得到同样的核心内容，否则写成 #原样
   function otherLine(c) {
@@ -279,7 +290,7 @@ function createMerger(ctx) {
         segs.push({ kind: 'say', head, speakerRaw, speaker, lines, raw, text });
         continue;
       }
-      if (isStageCmd(c)) {
+      if (isStageCmd(c) || (ctx.isPluginCmd && ctx.isPluginCmd(c))) {
         // 插件指令 + 续行算一行；再解析回去必须一模一样（续行也算），否则写成 #原样
         const raw = [c];
         let k = i + 1;
@@ -428,7 +439,7 @@ function createMerger(ctx) {
       // # 标记
       if (seg.text.startsWith(KEEP.trim())) throw new Error('「#原样」行只能删除或挪位置，不能改内容：' + seg.text);
       const it = seg.item || (ctx.parseScript(seg.text) || [])[0];
-      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作，立绘 #立绘 #退场，#场景）');
+      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作，立绘 #立绘 #退场，#场景，#插件 插件名 指令名（参数…））');
       if (it.type === 'bust' || it.type === 'unbust') {
         if (it.type === 'bust' && !ctx.picExists(it.who ? '立绘/' + it.who + '_' + it.face : '')) throw new Error('立绘不存在：img/pictures/立绘/' + it.who + '_' + it.face + '（先把图放进去，或者用「导入素材」）');
         emit((it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st)).map(at));
@@ -591,7 +602,9 @@ function createMerger(ctx) {
     });
     const E = al.anchors;
     const STRUCT = '带 ■ 的行是原来的结构（条件、插件、音效、选项的开头和结尾等），不能修改、删除或挪动；选项只能改「■ 选了「…」」那一行、加一行或删掉。';
-    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') : '带 ■ 的结构行不能删除：少了「' + e.line + '」');
+    // 想加插件指令却写了 ■ 行：告诉他编辑器里的写法
+    const pluginHint = t => (t && /^■\s*插件/.test(t.line) ? '（要加插件指令，写成「#插件 插件名 指令名（参数…）」，参数按插件里的顺序用「，」隔开；插件里写了参数表才写得出来）' : '');
+    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') + pluginHint(t) : '带 ■ 的结构行不能删除：少了「' + e.line + '」');
 
     // ---- 原来的选项：每个分支 / 按取消时 / 选项结束属于哪个「显示选项」 ----
     const blockOf = new Map(), blocks = [];
@@ -723,7 +736,7 @@ function createMerger(ctx) {
         if (usedT.has(j)) return;
         // 新选项：下面只能写台词
         const bad = x.items[0];
-        if (bad) { const t = lineOf(bad); throw new Error(`第 ${t.n} 行「${t.line}」：新加的选项下面只能写台词（带 ■ 的行是原来的结构，不能挪到别的选项下面）`); }
+        if (bad) { const t = lineOf(bad); throw new Error(`第 ${t.n} 行「${t.line}」：新加的选项下面只能写台词（带 ■ 的行是原来的结构，不能挪到别的选项下面）` + pluginHint(t)); }
       });
     };
     let strict = false, eTree = null;
