@@ -168,10 +168,45 @@ function cueRow(r) {
   const cnd = r.code === 402 && CUE_AT
     ? `<button type="button" class="cndbtn${r.condText ? ' on' : ''}" data-cline="${r.i}" data-clabel="${esc(String(r.label || '').trim())}" data-ccond="${esc(JSON.stringify(r.cond || {}))}" data-cat="${atJS}" title="${esc(r.condText ? '选项条件：' + r.condText : '给这个选项加条件：满足才能选（不然是灰的），或者满足才显示')}">${r.condText ? '条件' : '＋条件'}</button>${r.condText ? `<span class="cndtxt">${esc(r.condText)}</span>` : ''}`
     : '';
-  return `<div class="row${br}" data-ind="${r.indent}" style="${d}"><span class="rails"></span><div class="body">${br ? '<span class="brchev" aria-hidden="true"></span>' : ''}${body}${link}${cnd}${br ? '<span class="brn"></span>' : ''}</div><span class="lnum num">${r.i + 1}</span></div>`;
+  // 条件分支：改条件 / 拆掉（111 是结构行，编辑框里改不了，点这里改）
+  const ifb = r.code === 111 && CUE_AT
+    ? `<button type="button" class="cndbtn${r.condSrc ? ' on' : ''}" data-ifline="${r.i}" data-iftext="${esc(r.condSrc || '')}" data-iat="${atJS}" title="${r.condSrc ? '改这个条件（留空 = 拆掉条件）' : '这个条件编辑器里改不了，只能拆掉'}">条件</button>`
+    : '';
+  return `<div class="row${br}" data-ind="${r.indent}" style="${d}"><span class="rails"></span><div class="body">${br ? '<span class="brchev" aria-hidden="true"></span>' : ''}${body}${link}${cnd}${ifb}${br ? '<span class="brn"></span>' : ''}</div><span class="lnum num">${r.i + 1}</span></div>`;
 }
 // 分支开头（如果 / 选了 / 否则 / 按取消时 / 循环…）：点一下收起它下面缩进进去的内容
 const BRANCH_HEADS = new Set([111, 411, 402, 403, 112, 601, 602, 603]);
+// 改 / 拆条件分支（111）
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-ifline]');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const at = JSON.parse(b.dataset.iat);
+  const line = Number(b.dataset.ifline);
+  const txt = b.dataset.iftext || '';
+  const run = async (path, body, ok) => {
+    try { await api(path, body); toast(ok); render(); }
+    catch (err) { toast(err.message, true); }
+  };
+  if (!txt) {
+    if (await confirmDialog('拆掉这个条件', '这个条件编辑器里改不了，只能整个拆掉；「如果」里面的内容会提上来（「否则」那段会被删掉）。', '拆掉')) {
+      await run('cond/remove', { at, line }, '条件已拆掉');
+    }
+    return;
+  }
+  const v = await promptDialog('改条件', '变量 DayCount = 3 ／ 开关 自由时间 开（留空 = 拆掉这个条件，里面的内容提上来）', txt);
+  if (v == null) return;
+  const t = v.trim();
+  if (!t) {
+    if (await confirmDialog('拆掉条件', '把「如果」去掉，「如果」里面的内容提上来（「否则」那段会被删掉）？', '拆掉')) {
+      await run('cond/remove', { at, line }, '条件已拆掉');
+    }
+    return;
+  }
+  if (t === txt) return;
+  await run('cond/set', { at, line, text: t }, '条件已改');
+});
+
 document.addEventListener('click', e => {
   const head = e.target.closest('.cue .row.br');
   if (!head || e.target.closest('.ref, a, button, img')) return;
@@ -275,6 +310,8 @@ function editBox(box, pg, at) {
       <button class="small" id="insSay">插入人物</button>
       <button class="small" id="insItem">插入物品</button>
       <button class="small" id="insVar">插入变量</button>
+      <button class="small" id="insSwitch">插入开关</button>
+      <button class="small" id="insScene">插入场景</button>
       <button class="small" id="insTp">插入传送</button>
       ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">插扮演</button>' : ''}
       <button class="small" id="insFloat">插飘字</button>
@@ -291,6 +328,7 @@ function editBox(box, pg, at) {
       <tr><td>#开关 名字 开</td><td>也可以写编号；关 = 关闭</td></tr>
       <tr><td>#变量 名字 + 1</td><td>支持 = + - * / %</td></tr>
       <tr><td>#物品 名字 +1</td><td>获得 / 失去物品</td></tr>
+      <tr><td>#如果 变量 DayCount = 3</td><td>条件分支：下面这些行只有在条件成立时才执行，<span class="t-code">#否则</span> 写不成立时的那段，<span class="t-code">#结束</span> 收尾。能写 <span class="t-code">变量 名字 = / &gt;= / &lt;= / &gt; / &lt; / != 数字</span>，也能写 <span class="t-code">开关 名字 开</span> / <span class="t-code">关</span>。两个以上条件用 <span class="t-code">并且</span> / <span class="t-code">或者</span> 连起来（例：<span class="t-code">变量 DayCount &gt;= 3 并且 开关 夜间 开</span>）</td></tr>
       <tr><td>#传送 地图名 x y</td><td>${inScene
         ? '场景里的传送：<span class="t-code">#传送 圣佳 医务室 10 5 前进3</span> = 换成圣佳来演、传送过去、到了往前走 3 格（谁、朝向「朝上」、到了以后的步骤都可以不写）。场景播完主角自动回到进场景前的地方、换回原来的样子'
         : '主角传送到某张地图；后面可以写「朝上」和到了以后的步骤（<span class="t-code">#传送 一楼 10 5 朝上 前进3</span>）。场景外的传送就是主角自己，换人演要写在场景里'}</td></tr>
@@ -380,6 +418,11 @@ function editBox(box, pg, at) {
   $('#insSay', box).onclick = async () => { const n = await pickDialog('插入人物', 'lookup?kind=actor'); if (n) insert(n + '：'); };
   $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
   $('#insVar', box).onclick = async () => { const n = await pickDialog('插入变量', 'lookup?kind=var'); if (n) insert('#变量 ' + n + ' + 1'); };
+  $('#insSwitch', box).onclick = async () => { const n = await pickDialog('插入开关', 'lookup?kind=switch'); if (n) insert('#开关 ' + n + ' 开'); };
+  $('#insScene', box).onclick = async () => {
+    const n = await scenePicker();
+    if (n) insert('#场景 ' + n);
+  };
   $('#insTp', box).onclick = async () => { const t = await transferDialog(at && at.type === 'map' ? at.map : 0, { scene: inScene }); if (t) insert(transferLine(t)); };
   if (inScene) $('#insAs', box).onclick = async () => { const l = await asDialog(); if (l) insert(l); };
   $('#insFloat', box).onclick = async () => { const who = await whoDialog('飘字：字从谁头上冒出来', ['画面']); if (who) insert('#飘字 ' + who + '：'); };

@@ -37,6 +37,8 @@ async function sceneDialog(opts = {}, st = null) {
             <button type="button" class="small" id="scPicBtn" data-ins="pic" aria-expanded="false">插入 CG…</button>
             <button type="button" class="small" id="scItemBtn" data-ins="item" aria-expanded="false">插入物品…</button>
             <button type="button" class="small" id="scVarBtn" data-ins="var" aria-expanded="false">插入变量…</button>
+            <button type="button" class="small" data-ins2="sw">插入开关…</button>
+            <button type="button" class="small" data-ins2="sc">插入场景…</button>
             <button type="button" class="small" data-ins2="tp">插入传送…</button>
             <button type="button" class="small" data-ins2="as" title="场景里主角的小人换成别人，场景播完自动换回">插扮演…</button>
             <button type="button" class="small" data-ins2="float">插飘字…</button>
@@ -98,6 +100,12 @@ async function sceneDialog(opts = {}, st = null) {
         // 传送 / 飘字 / 动作（移动路线也写「动作 本事件 下3 左2」）
         $$('[data-ins2]', d).forEach(b => b.onclick = async () => {
           const kind = b.dataset.ins2;
+          if (kind === 'sw') { const n = await pickDialog('插入开关', 'lookup?kind=switch'); if (n) insert('#开关 ' + n + ' 开\n'); return; }
+          if (kind === 'sc') {
+            const n = await scenePicker();
+            if (n) insert('#场景 ' + n + '\n');
+            return;
+          }
           if (kind === 'tp') { const t = await transferDialog(p ? p.map : 0, { scene: true }); if (t) insert(transferLine(t) + '\n'); return; }
           if (kind === 'as') { const l = await asDialog(); if (l) insert(l + '\n'); return; }
           const who = await whoDialog(kind === 'float' ? '飘字：字从谁头上冒出来' : '动作 / 移动路线：谁动', kind === 'float' ? ['画面'] : []);

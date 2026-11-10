@@ -19,6 +19,8 @@ const SKIP = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|desktop\.ini)(\/|$)/i;
 const PNG_HEAD = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const FAKE = Buffer.from([0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0]);
 const ROOT = path.join(os.tmpdir(), 'rpgstudio-assets-' + crypto.createHash('sha256').update(__dirname).digest('hex').slice(0, 16));
+// 声音：同一个名字可能有 .ogg / .m4a（还有加密的 .ogg_ / .rpgmvo）
+const AUDIO_EXT = ['.ogg', '.m4a', '.ogg_', '.m4a_', '.rpgmvo', '.rpgmvm'];
 
 // 加密过的 PNG（.png_ / .rpgmvp，可能来自别的游戏）：PNG 文件开头 16 字节是固定的，拿它就能反推出密钥
 function decryptPng(buf) {
@@ -92,6 +94,31 @@ module.exports = function (ctx) {
   // 不同服务、用户工作区和工程各自暂存，不能互相读、覆盖或清理。
   const stageRoot = () => path.join(ctx.opts.assetsDir || ROOT, ctx.projectKey());
   const stageDir = id => { need(/^[a-z0-9]{6,32}$/.test(String(id || '')), '暂存区不对'); return path.join(stageRoot(), id); };
+  // 已经导入的声音：audio/<分类> 下面（一层子目录也看）
+  function listAudio(sub) {
+    const dir = path.join(project.gameRoot(), 'audio', sub);
+    const out = [];
+    const walk = (d, pre, depth) => {
+      let ents = [];
+      try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        if (e.isDirectory()) { if (depth < 2) walk(path.join(d, e.name), pre + e.name + '/', depth + 1); continue; }
+        const ext = AUDIO_EXT.find(x => e.name.toLowerCase().endsWith(x));
+        if (ext) out.push(pre + e.name.slice(0, -ext.length));
+      }
+    };
+    walk(dir, '', 0);
+    return out.sort();
+  }
+  function findAudio(sub, name) {
+    const dir = path.join(project.gameRoot(), 'audio', sub);
+    for (const ext of AUDIO_EXT) {
+      const file = path.join(dir, String(name).replace(/\//g, path.sep) + ext);
+      if (file.startsWith(dir + path.sep) && fs.existsSync(file)) return file;
+    }
+    return null;
+  }
+
   const inStage = (id, rel) => {
     const d = stageDir(id);
     const f = path.resolve(d, String(rel || '').replace(/\\/g, '/'));
@@ -147,6 +174,26 @@ module.exports = function (ctx) {
 
   return {
     get: {
+      // 已经导入到游戏里的素材：列出来，看得到大小、被剧情用到几处
+      'assets/imported'(T, q) {
+        const kind = String(q('kind') || 'img') === 'audio' ? 'audio' : 'img';
+        const subs = kind === 'img' ? IMG_SUBS : AUDIO_SUBS;
+        const rows = [];
+        const usage = kind === 'img' ? T.xref.counts('picture') : {};
+        for (const sub of subs) {
+          const names = kind === 'img' ? project.listImages(sub) : listAudio(sub);
+          for (const name of names) {
+            const file = kind === 'img' ? project.findImage(sub, name) : findAudio(sub, name);
+            if (!file) continue;
+            let st;
+            try { st = fs.statSync(file); } catch { continue; }
+            const used = kind === 'img' ? ((usage[name] || {}).total || 0) : 0;
+            rows.push({ kind, sub, name, size: st.size, mtime: st.mtimeMs, used, ext: path.extname(file) });
+          }
+        }
+        rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+        return { kind, rows };
+      },
       'assets/staging': (T, q) => staging(String(q('id') || '')),
       'assets/file'(T, q) {
         const f = inStage(q('id'), q('path'));
@@ -161,6 +208,23 @@ module.exports = function (ctx) {
       },
     },
     post: {
+      // 删掉一个已经导入的素材：先复制进备份（backups/…/assets-时间），再删原文件，删错了能找回来
+      'assets/delete'(T, b) {
+        const kind = String(b.kind || 'img') === 'audio' ? 'audio' : 'img';
+        const sub = String(b.sub || '');
+        const name = String(b.name || '');
+        need((kind === 'img' ? IMG_SUBS : AUDIO_SUBS).includes(sub), '分类不对');
+        need(name && !name.includes('..'), '名字不对');
+        const file = kind === 'img' ? project.findImage(sub, name) : findAudio(sub, name);
+        need(file && fs.existsSync(file), '找不到这个文件（可能已经删掉了）');
+        const dir = ctx.assetBackupDir(kind === 'img' ? 'images' : 'audio');
+        const dst = path.join(dir, sub, name.replace(/\//g, '__') + path.extname(file));
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.copyFileSync(file, dst);
+        fs.unlinkSync(file);
+        try { project.invalidate(); } catch { }
+        return { ok: true, backup: dst };
+      },
       // 导入：每个文件按选好的分类 / 名字写进游戏；同名的按 conflict 处理
       'assets/commit'(T, b) {
         const id = String(b.id || '');

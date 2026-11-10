@@ -7,6 +7,10 @@
 //         --port 8700       端口（被占用就往后找空的）
 //         --no-open         不自动打开浏览器
 //         --read-only       只读：能看不能改
+//         --no-pack         启动前不打包（下面「打包」那段）
+//         --pack            一定要先打包
+//   启动前会先打一次发布包（tools/build-release.js，用自带的 runtime\node）：本地版仓库里有 tools，
+//   发布包（app\ + runtime\）里没有，会自动跳过。
 // 数据都放在本地版文件夹的 data\ 里：导入的游戏（复制进来的）、工程设置、备份、导入素材的暂存
 const http = require('http');
 const net = require('net');
@@ -14,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { exec } = require('child_process');
+const { exec, spawnSync } = require('child_process');
 
 const MIN_NODE = 18;
 const args = process.argv.slice(2);
@@ -63,6 +67,32 @@ function openBrowser(url) {
 function findGame(dir) {
   for (const sub of ['', 'www']) if (fs.existsSync(path.join(dir, sub, 'data', 'System.json'))) return true;
   return false;
+}
+
+// ---------- 打包：本地版仓库里有 tools/build-release.js；发布包里没有 tools，自动跳过 ----------
+// 用自带的 runtime\node 打，不联网；失败不影响编辑器启动（只是这次没更新 dist 里的包）
+function packRelease() {
+  const script = path.join(HOME, 'tools', 'build-release.js');
+  if (!fs.existsSync(script)) {
+    if (flag('--pack')) note('这个文件夹里没有 tools\\build-release.js（发布包不带打包脚本），跳过');
+    return false;
+  }
+  const rt = path.join(HOME, 'runtime', 'node');
+  const argv = [script];
+  if (fs.existsSync(path.join(rt, 'node.exe'))) argv.push('--runtime', rt);
+  console.log('');
+  console.log('先打包发布包：');
+  const r = spawnSync(process.execPath, argv, { cwd: HOME, stdio: 'inherit' });
+  if (r.error || r.status !== 0) {
+    bad('打包没成功' + (r.error ? '：' + r.error.message : r.status == null ? '' : '（退出码 ' + r.status + '）') + '，接着启动编辑器');
+    return false;
+  }
+  try {
+    const v = version();
+    const zip = path.join(HOME, 'dist', `rpgStudio-${v ? v.version : ''}-win-x64.zip`);
+    if (fs.existsSync(zip)) ok('发布包：' + zip + '（' + (fs.statSync(zip).size / 1048576).toFixed(1) + ' MB）');
+  } catch { }
+  return true;
 }
 
 async function main() {
@@ -117,6 +147,9 @@ async function main() {
 
   if (fail) { console.log('\n有问题，没有启动。按上面的提示处理后再试。'); return 1; }
   if (flag('--check')) { console.log('\n环境没问题。双击「启动.cmd」就能用。'); return 0; }
+
+  // ---------- 先打包（--no-pack 跳过；发布包里没有 tools，自动跳过） ----------
+  if (!flag('--no-pack')) packRelease();
 
   // ---------- 启动 ----------
   const { createStudio } = require(path.join(STUDIO, 'handler.js'));

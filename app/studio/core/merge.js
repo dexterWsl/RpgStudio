@@ -128,13 +128,25 @@ const fmtSec = frames => String(Math.round((Number(frames) / 60) * 100) / 100);
 const clone = o => JSON.parse(JSON.stringify(o));
 const sameCmds = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+// 条件块：#如果 / #条件 … #结束 / #条件结束（#否则 / #不然 分段）
+const RE_IF_HEAD = /^[#＃]\s*(?:如果|条件)[\s:：]*(.+)$/;
+const RE_IF_END = /^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i;
+
 // 编辑框文字 → 片段（只看结构，不解析内容）
 function segmentText(text) {
   const segs = [];
   let cur = null;
+  let flow = null;        // 正在收集的 #如果 块：整块当成一个片段
   for (const line of String(text || '').replace(/\r/g, '').split('\n')) {
     const t = line.trim();
     if (!t) continue;
+    if (flow) {
+      flow.text += '\n' + t;
+      if (RE_IF_END.test(t)) { if (--flow.depth === 0) flow = null; }
+      else if (RE_IF_HEAD.test(t)) flow.depth += 1;
+      continue;
+    }
+    if (!RE_IF_END.test(t) && RE_IF_HEAD.test(t)) { segs.push(cur = flow = { kind: 'flow', text: t, depth: 1 }); continue; }
     if (/^[＋+]/.test(t)) {
       const content = line.replace(/^\s*[＋+]/, '');
       if (cur && cur.kind === 'say') { cur.lines.push(content); cur.text += '\n＋' + content; continue; }
@@ -435,16 +447,21 @@ function createMerger(ctx) {
         emit([{ code: 101, indent: ind, parameters: nameBox ? [...style, speakerRaw] : style }, ...lines.map(t => ({ code: 401, indent: ind, parameters: [t] }))]);
         continue;
       }
-      if (seg.kind === 'choice') {
+      if (seg.kind === 'choice' || seg.kind === 'flow') {
         const items = ctx.parseScript(seg.text);
-        if (items.length !== 1 || items[0].type !== 'choice') throw new Error('选项写法不对：' + seg.text.split('\n')[0] + '（例：#选项 去 | 不去，下面用 #1 #2 写各自的内容）');
+        const want = seg.kind === 'flow' ? 'if' : 'choice';
+        if (items.length !== 1 || items[0].type !== want) {
+          throw new Error(seg.kind === 'flow'
+            ? '条件写法不对：' + seg.text.split('\n')[0] + '（例：#如果 变量 天数 = 3 … #结束）'
+            : '选项写法不对：' + seg.text.split('\n')[0] + '（例：#选项 去 | 不去，下面用 #1 #2 写各自的内容）');
+        }
         emit(ctx.scriptCommands(items).map(at));
         continue;
       }
       // # 标记
       if (seg.text.startsWith(KEEP.trim())) throw new Error('「#原样」行只能删除或挪位置，不能改内容：' + seg.text);
       const it = seg.item || (ctx.parseScript(seg.text) || [])[0];
-      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景，#插件 插件名 指令名（参数…））');
+      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景，#如果 条件 / #否则 / #结束，#插件 插件名 指令名（参数…））');
       if (it.type === 'bust' || it.type === 'unbust') {
         if (it.type === 'bust' && !ctx.picExists(it.who ? '立绘/' + it.who + '_' + it.face : '')) throw new Error('立绘不存在：img/pictures/立绘/' + it.who + '_' + it.face + '（先把图放进去，或者用「导入素材」）');
         emit((it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st)).map(at));
@@ -603,6 +620,9 @@ function createMerger(ctx) {
     if (!al.editable) throw new Error('这段不能整段改：' + (al.reason || '结构复杂'));
     // ---- 切文字：内容段 + ■ 行 ----
     const parts = [[]], T = [];
+    // 条件行现在写成「#如果 …」「#否则」「#结束」，和 ■ 行一样是结构行（要对得上原来的那一条）
+    const expectLine = al.anchors.map(a => a.line);
+    let anSeen = 0;
     String(text || '').replace(/\r/g, '').split('\n').forEach((raw, n) => {
       const s = stripBar(raw), t = s.trim();
       if (t.startsWith(ANCHOR)) {
@@ -614,10 +634,10 @@ function createMerger(ctx) {
       parts[parts.length - 1].push(s);
     });
     const E = al.anchors;
-    const STRUCT = '带 ■ 的行是原来的结构（条件、插件、音效、选项的开头和结尾等），不能修改、删除或挪动；选项只能改「■ 选了「…」」那一行、加一行或删掉。';
+    const STRUCT = '带 ■ 的行是原来的结构（条件、插件、音效、选项的开头和结尾等），不能删除或挪动；条件行（■ 如果 …）可以改条件本身，选项只能改「■ 选了「…」」那一行、加一行或删掉。';
     // 想加插件指令却写了 ■ 行：告诉他编辑器里的写法
     const pluginHint = t => (t && /^■\s*插件/.test(t.line) ? '（要加插件指令，写成「#插件 插件名 指令名（参数…）」，参数按插件里的顺序用「，」隔开；插件里写了参数表才写得出来）' : '');
-    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') + pluginHint(t) : '带 ■ 的结构行不能删除：少了「' + e.line + '」');
+    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') + pluginHint(t) : '带 ■ / # 的结构行不能删除：少了「' + e.line + '」');
 
     // ---- 原来的选项：每个分支 / 按取消时 / 选项结束属于哪个「显示选项」 ----
     const blockOf = new Map(), blocks = [];
@@ -702,12 +722,32 @@ function createMerger(ctx) {
     const dropped = new Set();  // 删掉的选项里的所有原来的 ■ 行
     const lineOf = it => (it.fixed || it.head);
     const dropAll = items => { for (const it of items) { if (it.fixed) dropped.add(it.fixed); else { dropped.add(it.head); dropped.add(it.end); for (const br of it.branches) { dropped.add(br.e); dropAll(br.items); } if (it.cancel) { dropped.add(it.cancel.e); dropAll(it.cancel.items); } } } };
+    // 条件行（■ 如果 …）允许在编辑框里直接改条件，改完只换 111 的参数
+    const condEdits = new Map();
+    const condParamsOf = line => {
+      const mm = /^[#■]\s*如果\s+([\s\S]+)$/.exec(String(line || '').trim());
+      if (!mm) return null;
+      try {
+        const items = ctx.parseScript('#如果 ' + mm[1] + '\n#结束');
+        if (items.length !== 1 || items[0].type !== 'if') return null;
+        const cmds = ctx.scriptCommands(items);
+        return cmds[0] && cmds[0].code === 111 ? cmds[0].parameters : null;
+      } catch { return null; }
+    };
     const alignSeq = (es, ts, m, tb, dr) => {
       for (let k = 0; k < Math.max(es.length, ts.length); k++) {
         const e = es[k], t = ts[k];
         if (!t) throw wrong(null, lineOf(e));
         if (!e) throw wrong(lineOf(t), null);
-        if (e.fixed && t.fixed) { if (t.fixed.line !== e.fixed.line.trim()) throw wrong(t.fixed, e.fixed); m.set(t.fixed, e.fixed); continue; }
+        if (e.fixed && t.fixed) {
+          if (t.fixed.line !== e.fixed.line.trim()) {
+            const p = e.fixed.code === 111 ? condParamsOf(t.fixed.line) : null;
+            if (!p) throw wrong(t.fixed, e.fixed);
+            condEdits.set(t.fixed, p);
+          }
+          m.set(t.fixed, e.fixed);
+          continue;
+        }
         if (e.b && t.head) { alignBlock(e, t, m, tb, dr); continue; }
         throw wrong(lineOf(t), lineOf(e));
       }
@@ -830,6 +870,9 @@ function createMerger(ctx) {
         } else out.push(...list.slice(e.head, e.end + 1));
         open.set(b, code !== 404);
         ctxInd = code === 404 ? b.ind : b.ind + 1;
+      } else if (e.code === 111 && condEdits.has(t)) {
+        out.push(...list.slice(e.start, e.head), { ...list[e.head], parameters: condEdits.get(t) }, ...list.slice(e.head + 1, e.end + 1));
+        ctxInd = e.indent + 1;
       } else {
         out.push(...list.slice(e.start, e.end + 1));
         ctxInd = [111, 411, 112, 601, 602, 603, 402, 403].includes(e.code) ? e.indent + 1 : e.indent;

@@ -203,6 +203,45 @@ module.exports = function (ctx) {
       });
       return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
     },
+    // 改「如果」的条件本身：111 是结构行，编辑框里改不了，单独给个接口（条件写法同 #如果）
+    'cond/set'(T, b) {
+      const at = target(b);
+      const line = int(b.line, '第几条不对');
+      const params = T.script.condParams(String(b.text || ''));
+      T.store.edit([fileOf(at)], docs => {
+        const { holder } = locate(docs, at);
+        const c = (holder.list || [])[line];
+        need(c && c.code === 111, '这一行不是条件');
+        c.parameters = params;
+      });
+      return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
+    },
+    // 拆掉条件：去掉 111…412（连同「否则」那段），把「如果」里的内容提上来，缩进 -1
+    'cond/remove'(T, b) {
+      const at = target(b);
+      const line = int(b.line, '第几条不对');
+      T.store.edit([fileOf(at)], docs => {
+        const { holder } = locate(docs, at);
+        const list = holder.list || [];
+        const c = list[line];
+        need(c && c.code === 111, '这一行不是条件');
+        const ind = c.indent || 0;
+        let depth = 0, elseAt = -1, endAt = -1;
+        for (let i = line + 1; i < list.length; i++) {
+          const x = list[i];
+          if (!x) continue;
+          if (x.code === 111) depth++;
+          else if (x.code === 412) { if (depth === 0) { endAt = i; break; } depth--; }
+          else if (x.code === 411 && depth === 0 && elseAt < 0) elseAt = i;
+        }
+        need(endAt > 0, '找不到这个条件对应的「条件结束」');
+        const body = list.slice(line + 1, elseAt > 0 ? elseAt : endAt);
+        while (body.length && body[body.length - 1].code === 0) body.pop();
+        for (const x of body) if ((x.indent || 0) > ind) x.indent -= 1;
+        list.splice(line, endAt - line + 1, ...body);
+      });
+      return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
+    },
     'event/create'(T, b) {
       const mapId = int(b.map, '地图编号不对');
       const x = int(b.x, '坐标不对'), y = int(b.y, '坐标不对');

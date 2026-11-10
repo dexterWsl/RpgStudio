@@ -35,6 +35,8 @@ function anchorTextOf(describer) {
       case 402: return '选了「' + (p[1] ?? '') + '」';
       case 403: return '按取消时';
       case 404: return '选项结束';
+      // 条件（如果 / 否则 / 结束）写成 # 开头，和别的内容行一样能在改台词里改；
+      //   条件认不出来（脚本、独立开关…）时退回 ■，只读
       case 411: return '否则';
       case 412: return '条件结束';
       case 111: return '如果 ' + describer.condText(p);

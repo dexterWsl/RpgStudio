@@ -142,6 +142,81 @@ function createScript(project, opts = {}) {
     return { type: 'transfer', who, map, x: Number(toks[i]), y: Number(toks[i + 1]), dir, steps: post.join(' '), bad: post.filter(t => !stage.validStep(t)) };
   }
 
+  // 条件（#如果 / #条件 后面那段）：
+  //   变量 DayCount >= 3 · DayCount >= 3 · 变量 11 = 3 · 变量 天数 大于等于 3 · 开关 自由时间 开
+  const COND_OP = { '=': 0, '==': 0, '>=': 1, '<=': 2, '>': 3, '<': 4, '!=': 5 };
+  const COND_WORDS = [
+    ['大于等于', '>='], ['不小于', '>='], ['小于等于', '<='], ['不大于', '<='], ['不等于', '!='],
+    ['>=', '>='], ['<=', '<='], ['!=', '!='], ['≠', '!='], ['<>', '!='], ['==', '='],
+    ['等于', '='], ['大于', '>'], ['小于', '<'], ['=', '='], ['>', '>'], ['<', '<'],
+  ];
+  // 找不到名字时给个"是不是某某"的提示（比如 天数 → DayCount）
+  function nearName(kind, name) {
+    const rows = P.rows(kind).filter(x => x.name);
+    const q = String(name).trim().toLowerCase();
+    const dayish = /天|日|day/.test(q);
+    const hit = rows.find(x => {
+      const n = x.name.toLowerCase();
+      return (dayish && /day|天|日/.test(n)) || n.includes(q) || q.includes(n);
+    });
+    return hit ? hit.name : '';
+  }
+  // 一个条件 → 111 的参数（开关：[0,id,0|1]，变量：[1,id,0,值,比较]）
+  function condOne(t) {
+    for (const [word, sym] of COND_WORDS) {
+      const at = t.lastIndexOf(word);
+      if (at <= 0) continue;
+      const name = t.slice(0, at).replace(/^变量\s*/, '').trim();
+      const val = t.slice(at + word.length).trim();
+      if (!name || !/^-?\d+$/.test(val)) continue;
+      const id = resolveRef(name, 'var');
+      if (!id) {
+        const near = nearName('var', name);
+        throw new Error('找不到这个变量：' + name + (near ? '（是不是「' + near + '」？）' : '') + '　例：#如果 变量 ' + (near || 'DayCount') + ' >= 3');
+      }
+      return [1, id, 0, Number(val), COND_OP[sym]];
+    }
+    const sw = /^(?:开关\s*)?(.+?)\s*(开|关)$/.exec(t);
+    if (sw) {
+      const id = resolveRef(sw[1].trim(), 'switch');
+      if (!id) {
+        const near = nearName('switch', sw[1].trim());
+        throw new Error('找不到这个开关：' + sw[1].trim() + (near ? '（是不是「' + near + '」？）' : '') + '　例：#如果 开关 自由时间 开');
+      }
+      return [0, id, sw[2] === '关' ? 1 : 0];
+    }
+    throw new Error('条件看不懂：' + t + '（能写「变量 DayCount >= 3」「开关 自由时间 开」）');
+  }
+  // 条件 → 脚本（多个条件用 并且 / 或者 连起来时，存成一条「脚本」条件）
+  const condJS = p => p[0] === 0
+    ? (p[2] ? `$gameSwitches.value(${p[1]}) === false` : `$gameSwitches.value(${p[1]})`)
+    : `$gameVariables.value(${p[1]}) ${['==', '>=', '<=', '>', '<', '!='][p[4]] || '=='} ${p[3]}`;
+  // #如果 / #条件 后面那段：先拆 并且 / 或者，再一个个认
+  function condParams(text) {
+    let t = String(text || '').trim();
+    // 外面套了方括号 / 圆括号（[变量 X>=30]、【…】）先剥掉
+    for (let k = 0; k < 3; k++) {
+      const m = /^[\[【(（]\s*([\s\S]*?)\s*[\]】)）]$/.exec(t);
+      if (!m) break;
+      t = m[1].trim();
+    }
+    t = t.replace(/[（(][^）)]*(?:变量|开关)[^）)]*[）)]/g, '').trim();
+    // 从阅读视图抄下来的样子也认：变量 38「名字」 ≥ 1、开关 26「名字」 为开
+    t = t.replace(/「[^」]{0,40}」/g, '')
+      .replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/≠/g, '!=')
+      .replace(/＝/g, '=').replace(/为s*(开|关)s*$/, '$1')
+      .replace(/\s+/g, ' ').trim();
+    if (!t) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
+    const ors = t.split(/\s*(?:或者|或是|或|\|\||\|)\s*/).map(s => s.trim()).filter(Boolean);
+    if (!ors.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
+    const groups = ors.map(g => g.split(/\s*(?:并且|而且|同时|且|&&|&)\s*/).map(s => s.trim()).filter(Boolean));
+    const flat = groups.flat();
+    if (!flat.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
+    if (flat.length === 1) return condOne(flat[0]);
+    const parts = groups.map(g => g.map(one => condJS(condOne(one))).join(' && '));
+    return [12, parts.length === 1 ? parts[0] : parts.map(p => '(' + p + ')').join(' || ')];
+  }
+
   function parseScript(text) {
     const items = [];
     const addMore = (list, line) => {
@@ -151,6 +226,8 @@ function createScript(project, opts = {}) {
       return true;
     };
     let choice = null;
+    const stack = [];                                   // 还没收尾的 #如果
+    const target = () => (stack.length ? stack[stack.length - 1].branch : items);
     const parseOne = line => {
       const pic = /^[#＃]\s*(?:图|CG|cg|显示图片)[\s:：]+(.+)$/.exec(line);
       if (pic) return { type: 'pic', name: pic[1].trim() };
@@ -236,10 +313,32 @@ function createScript(project, opts = {}) {
     for (const raw of String(text || '').split(/\r?\n/)) {
       const line = raw.trim();
       if (!line) continue;
+      // #如果 条件 … #否则 … #结束
+      const iff = /^[#＃]\s*(?:如果|条件)[\s:：]*(.+)$/.exec(line);
+      if (iff && !/^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i.test(line)) {
+        const node = { type: 'if', cond: iff[1].trim(), then: [], else: null, branch: null };
+        node.branch = node.then;
+        stack.push(node);
+        continue;
+      }
+      if (/^[#＃]\s*(?:否则|不然)\s*$/.test(line)) {
+        const node = stack[stack.length - 1];
+        if (!node) throw new Error('「#否则」前面没有 #如果');
+        if (node.else) throw new Error('一个 #如果 只能写一个 #否则');
+        node.else = [];
+        node.branch = node.else;
+        continue;
+      }
+      if (/^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i.test(line)) {
+        const node = stack.pop();
+        if (!node) throw new Error('「#结束」前面没有 #如果');
+        target().push(node);
+        continue;
+      }
       const ch = /^[#＃]\s*选项[\s:：]+(.+)$/.exec(line);
       if (ch) {
         const labels = ch[1].split(/[|｜]/).map(x => x.trim()).filter(Boolean).slice(0, 6);
-        if (labels.length >= 2) { choice = { type: 'choice', labels, branches: labels.map(() => []) }; items.push(choice); continue; }
+        if (labels.length >= 2) { choice = { type: 'choice', labels, branches: labels.map(() => []) }; target().push(choice); continue; }
       }
       const br = /^[#＃](\d+)\s+(.+)$/.exec(line);
       if (br && choice && Number(br[1]) >= 1 && Number(br[1]) <= choice.labels.length) {
@@ -249,9 +348,10 @@ function createScript(project, opts = {}) {
         continue;
       }
       if (/^[#＃](\d+)$/.test(line)) continue;
-      if (addMore(items, line)) continue;
-      items.push(parseOne(line));
+      if (addMore(target(), line)) continue;
+      target().push(parseOne(line));
     }
+    if (stack.length) throw new Error('「#如果」还差 ' + stack.length + ' 个「#结束」');
     return items;
   }
 
@@ -267,6 +367,18 @@ function createScript(project, opts = {}) {
     for (const it of items) {
       if ((it.type === 'item' && !it.id) || (it.type === 'var' && !it.id) || (it.type === 'switch' && !it.id) || (it.type === 'transfer' && !it.map)) {
         throw new Error('找不到这个名字：' + JSON.stringify(it));
+      }
+      if (it.type === 'if') {
+        out.push({ code: 111, indent: 0, parameters: condParams(it.cond) });
+        for (const sub of scriptCommands(it.then, o)) out.push({ ...sub, indent: (sub.indent || 0) + 1 });
+        out.push({ code: 0, indent: 1, parameters: [] });
+        if (it.else) {
+          out.push({ code: 411, indent: 0, parameters: [] });
+          for (const sub of scriptCommands(it.else, o)) out.push({ ...sub, indent: (sub.indent || 0) + 1 });
+          out.push({ code: 0, indent: 1, parameters: [] });
+        }
+        out.push({ code: 412, indent: 0, parameters: [] });
+        continue;
       }
       if (it.type === 'choice') {
         out.push({ code: 102, indent: 0, parameters: [it.labels.slice(), it.labels.length - 1, 0, 2, 1] });
@@ -478,7 +590,7 @@ function createScript(project, opts = {}) {
     return '';
   }
 
-  return { parseScript, scriptCommands, resolveRef, refText, exists, msgHead, stagingCommand, stagingLine, bustCommands, unbustCommands, isBustId, parseBustName, stageCommands };
+  return { parseScript, scriptCommands, resolveRef, refText, exists, msgHead, stagingCommand, stagingLine, bustCommands, unbustCommands, isBustId, parseBustName, stageCommands, condParams };
 }
 
 module.exports = { createScript, TINTS, BALLOONS, parseBustName, centerPad };

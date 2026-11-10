@@ -33,6 +33,7 @@ async function viewAssets(main) {
     <div class="upbar" id="asBar" hidden><div class="upfill"></div><span class="uptext"></span></div>
     <div id="asErr"></div>
     <div id="asBody"></div>
+    <div class="card" id="asLib" style="margin-top:16px"></div>
   </div>`;
   const err = m => { $('#asErr').innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
   const send = async list => {
@@ -65,6 +66,83 @@ async function viewAssets(main) {
   $('#asFile').onchange = e => send([...e.target.files].map(f => ({ file: f, rel: f.name })));
   $('#asDir').onchange = e => send([...e.target.files].map(f => ({ file: f, rel: f.webkitRelativePath || f.name })));
   if (AS && AS.id) loadStaging(AS.id).catch(() => { AS = null; });
+  loadLib();
+}
+
+// ---------------- 已导入的素材：看看有哪些、用过没有、删掉 ----------------
+const AL = { kind: 'img', q: '', sub: 'pictures', rows: { img: null, audio: null } };
+
+async function loadLib(force) {
+  const box = $('#asLib');
+  if (!box) return;
+  const kind = AL.kind;
+  if (!AL.rows[kind] || force) {
+    box.innerHTML = '<div class="loading">正在读已导入的素材…</div>';
+    try { AL.rows[kind] = (await api('assets/imported?kind=' + kind)).rows; }
+    catch (e) { box.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  }
+  drawLib();
+}
+
+function libRow(r) {
+  const kb = r.size >= 1048576 ? (r.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(r.size / 1024)) + ' KB';
+  const thumb = r.kind === 'img'
+    ? `<img loading="lazy" src="${img(r.sub, r.name)}" alt="">`
+    : '<span class="liba">♪</span>';
+  const used = r.kind !== 'img' ? '' : (r.used ? `<span class="tag">${r.used} 处用到</span>` : '<span class="dim">没被用到</span>');
+  return `<div class="librow">${thumb}
+    <span class="libname" title="${esc(r.sub + '/' + r.name)}">${esc(r.name)}<span class="faint"> · ${esc(r.sub)}</span></span>
+    ${used}<span class="dim">${kb}</span>
+    <button type="button" class="small" data-libdel data-sub="${esc(r.sub)}" data-name="${esc(r.name)}" data-used="${r.used || 0}">删除</button></div>`;
+}
+
+function drawLib() {
+  const box = $('#asLib');
+  if (!box) return;
+  const rows = AL.rows[AL.kind] || [];
+  const q = AL.q.trim().toLowerCase();
+  const subs = [...new Set(rows.map(r => r.sub))].sort();
+  const hit = rows.filter(r => (!AL.sub || r.sub === AL.sub) && (!q || (r.sub + '/' + r.name).toLowerCase().includes(q)));
+  const show = hit.slice(0, 300);
+  const subOpt = (s, label) => `<option value="${esc(s)}" ${AL.sub === s ? 'selected' : ''}>${esc(label)}</option>`;
+  box.innerHTML = `<div class="libhead">
+      <h2>已导入的素材</h2>
+      <span class="seg" id="libKind">
+        <button type="button" data-k="img" class="${AL.kind === 'img' ? 'on' : ''}">图片</button>
+        <button type="button" data-k="audio" class="${AL.kind === 'audio' ? 'on' : ''}">声音</button>
+      </span>
+      <select id="libSub">
+        ${subOpt('', '全部分类（' + rows.length + '）')}
+        ${subs.map(s => subOpt(s, (SUB_LABEL[s] || s) + '（' + rows.filter(r => r.sub === s).length + '）')).join('')}
+      </select>
+      <input id="libQ" type="search" placeholder="搜索名字" value="${esc(AL.q)}">
+      <span class="dim">${hit.length} 个${hit.length > show.length ? '，只显示前 ' + show.length + ' 个（搜一下缩小范围）' : ''}</span>
+    </div>
+    <div id="libList">${show.map(libRow).join('') || '<div class="empty">没有符合的素材</div>'}</div>`;
+  $$('#libKind button', box).forEach(b => b.onclick = () => {
+    AL.kind = b.dataset.k; AL.q = ''; AL.sub = b.dataset.k === 'img' ? 'pictures' : ''; loadLib();
+  });
+  const ss = $('#libSub', box);
+  if (ss) ss.onchange = e => { AL.sub = e.target.value; drawLib(); };
+  const qi = $('#libQ', box);
+  qi.oninput = e => {
+    AL.q = e.target.value;
+    drawLib();
+    const n = $('#libQ', box);
+    if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+  };
+  $$('[data-libdel]', box).forEach(b => b.onclick = () => delLib(b.dataset.sub, b.dataset.name, b.dataset.used));
+}
+
+async function delLib(sub, name, used) {
+  const warn = Number(used) ? `\n\n注意：有 ${used} 处剧情在用它，删掉以后那些地方会显示不出来。` : '';
+  if (!await confirmDialog('删除素材', `把「${sub}/${name}」移进备份并删掉？${warn}`, '删除')) return;
+  try {
+    const r = await api('assets/delete', { kind: AL.kind, sub, name });
+    toast('已删除，备份在 ' + r.backup);
+    AL.rows[AL.kind] = null;
+    await loadLib();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function loadStaging(id) {

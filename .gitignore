@@ -16,6 +16,8 @@
 
 # ---- 依赖 ----
 /node_modules/
+__pycache__/
+*.pyc
 
 # ---- 发布产物 ----
 /dist/

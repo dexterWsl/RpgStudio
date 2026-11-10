@@ -75,10 +75,63 @@ function createDescriber(project, opts = {}) {
       case 9: return `持有 ${L('weapon', p[1])}` + (p[2] ? '（含装备中）' : '');
       case 10: return `持有 ${L('armor', p[1])}` + (p[2] ? '（含装备中）' : '');
       case 11: return `按着 ${p[1]} 键`;
-      case 12: return '脚本 ' + short(p[1], 50);
+      case 12: { const g = parseCondScript(p[1]); return g ? condGroupsText(g, true) : '脚本 ' + short(p[1], 50); }
       case 13: return `乘坐${['小船', '大船', '飞艇'][p[1]] || '载具'}`;
     }
     return `条件（类型 ${p[0]}）`;
+  }
+
+  // 「脚本」条件 → 条件列表：[[条件,条件…], …]（外层的每一项之间是「或者」，里层是「并且」）
+  //   只认 #如果 生成的那种 $gameVariables.value(n) >= 3 / $gameSwitches.value(n) 写法
+  function parseCondScript(script) {
+    const src = String(script || '').trim();
+    if (!src) return null;
+    const splitTop = (s, op) => {
+      const out = []; let d = 0, cur = '';
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '(') d++;
+        else if (ch === ')') d--;
+        if (d === 0 && s.startsWith(op, i)) { out.push(cur); cur = ''; i += op.length - 1; continue; }
+        cur += ch;
+      }
+      out.push(cur);
+      return out;
+    };
+    const one = t => {
+      let x = String(t).trim();
+      for (let k = 0; k < 3 && /^\([\s\S]*\)$/.test(x); k++) x = x.slice(1, -1).trim();
+      let m = /^\$gameVariables\.value\((\d+)\)\s*(===|!==|==|!=|>=|<=|>|<)\s*(-?\d+)$/.exec(x);
+      if (m) {
+        const op = { '===': 0, '==': 0, '=': 0, '!==': 5, '!=': 5, '>=': 1, '<=': 2, '>': 3, '<': 4 }[m[2]];
+        return op == null ? null : { kind: 'var', id: Number(m[1]), op, val: Number(m[3]) };
+      }
+      m = /^!\s*\$gameSwitches\.value\((\d+)\)$/.exec(x);
+      if (m) return { kind: 'switch', id: Number(m[1]), on: false };
+      m = /^\$gameSwitches\.value\((\d+)\)\s*(?:===?|!==?)\s*(true|false)$/.exec(x);
+      if (m) return { kind: 'switch', id: Number(m[1]), on: m[2] !== 'false' };
+      m = /^\$gameSwitches\.value\((\d+)\)$/.exec(x);
+      if (m) return { kind: 'switch', id: Number(m[1]), on: true };
+      return null;
+    };
+    const groups = splitTop(src, '||').map(g => splitTop(g, '&&').map(one));
+    if (groups.some(g => !g.length || g.some(x => !x))) return null;
+    return groups;
+  }
+  const CMP_SRC = ['=', '>=', '<=', '>', '<', '!='];
+  const condTermText = (t, display) => t.kind === 'switch'
+    ? (display ? `${L('switch', t.id)} 为${t.on ? '开' : '关'}` : `开关 ${t.id} ${t.on ? '开' : '关'}`)
+    : (display ? `${L('var', t.id)} ${CMP[t.op] || '?'} ${t.val}` : `变量 ${t.id} ${CMP_SRC[t.op] || '='} ${t.val}`);
+  const condGroupsText = (groups, display) => groups
+    .map(g => g.map(t => condTermText(t, display)).join(' 并且 ')).join(' 或者 ');
+
+  // 条件 → 编辑框里能再写一遍的写法（开关 / 变量 / 并且 / 或者）
+  function condSrc(p) {
+    p = p || [];
+    if (p[0] === 0) return `开关 ${p[1]} ${p[2] === 0 ? '开' : '关'}`;
+    if (p[0] === 1 && p[2] === 0) return `变量 ${p[1]} ${CMP_SRC[p[4]] || '='} ${p[3]}`;
+    if (p[0] === 12) { const g = parseCondScript(p[1]); return g ? condGroupsText(g, false) : ''; }
+    return '';
   }
 
   function describe(c) {
@@ -269,6 +322,7 @@ function createDescriber(project, opts = {}) {
       if (!c) continue;
       const p = c.parameters || [];
       const row = { i, end: i, code: c.code, indent: c.indent || 0, cat: category(c.code) };
+      if (c.code === 111) row.condSrc = condSrc(p);
       if (c.code === 0 && i === list.length - 1) continue;   // 整页最后的结束标记不显示
       if (c.code === 101) {
         const lines = [];
@@ -324,7 +378,7 @@ function createDescriber(project, opts = {}) {
     return rows.filter(r => !(r.code === 0 && !r.text));
   }
 
-  return { describe, condText, operand, pageConditions, outline, category, refsOf, codes };
+  return { describe, condText, condSrc, operand, pageConditions, outline, category, refsOf, codes };
 }
 
 module.exports = { createDescriber, category, TRIGGERS, PRIORITIES, CE_TRIGGERS, VAR_OPS, CMP };

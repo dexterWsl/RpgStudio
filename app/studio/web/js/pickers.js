@@ -187,6 +187,19 @@ async function asDialog() {
   return v ? '#扮演 ' + v.trim().replace(/\s+/g, ' ') : null;
 }
 
+// #场景：播一个公共事件。场景库里有名字的排前面，其它公共事件（比如「擦除一楼遮挡层」）也在列表里
+async function scenePicker() {
+  const [sc, ce] = await Promise.all([
+    api('scenes').catch(() => ({ scenes: [] })),
+    api('ces').catch(() => ({ ces: [] })),
+  ]);
+  const scenes = (sc.scenes || []).map(s => s.name).filter(Boolean);
+  const all = (ce.ces || []).filter(c => String(c.name || '').trim()).map(c => c.name);
+  const names = [...scenes, ...all.filter(n => !scenes.includes(n))];
+  if (!names.length) { toast('还没有能调用的公共事件', true); return null; }
+  return (await chooseDialog('插入场景：播哪个公共事件（场景库里的排前面）', names)) || null;
+}
+
 // 谁：主角 / 本事件 /（飘字还有画面）/ 人物 / 手动输入
 async function whoDialog(title, extra = []) {
   const actors = await lookup('actor').then(rows => rows.map(a => a.name).filter(Boolean)).catch(() => []);
