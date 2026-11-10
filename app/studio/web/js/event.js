@@ -300,7 +300,8 @@ function editBox(box, pg, at) {
   const inScene = !!pg.isScene;   // 场景（公共事件带场景标记）：能 #扮演、#传送 选人，播完自动换回主角
   const clearHint = P.pictures.clearAll === 'script' ? `关闭全部剧情图片（${P.pictures.min}~${P.pictures.max} 号）` : '关闭这一页里还在显示的图';
   box.innerHTML = `
-    <div class="editor"><pre aria-hidden="true"></pre><textarea spellcheck="false" aria-label="台词"></textarea></div>
+    <div class="editor"><div class="edstack"><pre aria-hidden="true"></pre><textarea spellcheck="false" aria-label="台词"></textarea></div></div>
+    <div class="edplain" hidden>这台电脑上着色层和输入框的折行对不上，先关掉了颜色，免得看着改这一行、其实改到别的行（不影响保存）。</div>
     <div class="edbar">
       <button class="primary" id="saveTxt" disabled>保存台词</button>
       <button id="previewTxt" disabled>先看看会改什么</button>
@@ -361,22 +362,62 @@ function editBox(box, pg, at) {
   const ta = $('textarea', box), pre = $('pre', box);
   let orig = sc.text;
   ta.value = orig;
-  // 着色层（pre）要和输入框一模一样地折行：输入框出了滚动条（Windows 上占十几像素）内容就变窄，
-  // 着色层也得让出同样的宽度，不然长行折得不一样，下面的字整体错位——看着在改这一行，其实改的是别的行
-  const padR = parseFloat(getComputedStyle(ta).paddingRight) || 16;
-  const align = () => { pre.style.paddingRight = (padR + Math.max(0, ta.offsetWidth - ta.clientWidth)) + 'px'; pre.scrollTop = ta.scrollTop; };
-  const sync = () => { pre.innerHTML = paint(ta.value); align(); };
-  const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.max(340, Math.min(ta.scrollHeight + 4, window.innerHeight * 0.72)) + 'px'; };
+  // 着色层（pre）和输入框（textarea）叠在同一个格子里（.edstack 是一格的 grid）：
+  //   - 两层宽度天生一样；输入框跟着内容长高、自己永远不出滚动条，滚动的是外面的 .editor ——
+  //     以前输入框自己滚，着色层要让出滚动条的宽度、同步 scrollTop：Windows 上滚动条宽度一缩放就不是整数，
+  //     两层差零点几个像素，卡在边上的长行一个折一个不折，下面整体错一行（看着在改这一行，字却进了下一行）
+  //   - 两层都关掉字距调整和连字（CSS），分成几段上色也不会改变字宽
+  //   - 还是对不上（比如某台电脑的字体渲染特别）：两层高度不一样就关掉颜色，只留输入框，至少不会改错行
+  const wrap = $('.editor', box), plainNote = $('.edplain', box);
+  const MIN_H = 340;
+  let userSized = false, setH = 0;
+  const check = () => {
+    // 两层折出来的总高度应该一样（输入框至少 MIN_H 高）
+    const want = Math.max(pre.offsetHeight, MIN_H), got = Math.max(ta.scrollHeight, MIN_H);
+    const off = Math.abs(want - got) > parseFloat(getComputedStyle(ta).lineHeight) * 0.5;
+    wrap.classList.toggle('plain', off);
+    plainNote.hidden = !off;
+  };
+  const fit = () => {
+    const top = wrap.scrollTop;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    wrap.scrollTop = top;
+    // 框的高度：跟着内容长，最多占窗口的七成；拖过右下角改过高度就听用户的
+    if (!userSized) { wrap.style.height = Math.min(Math.max(ta.offsetHeight, MIN_H) + 2, Math.round(window.innerHeight * 0.72)) + 'px'; setH = wrap.offsetHeight; }
+    check();
+  };
+  const sync = () => { pre.innerHTML = paint(ta.value); };
+  // 把光标那一行滚进框里：打字、按方向键浏览器自己会滚；按钮插进去的内容不会，靠着色层里同一个位置量出来
+  const revealCaret = () => {
+    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+    let n, left = ta.selectionEnd, last = null;
+    while ((n = walker.nextNode())) { last = n; if (left <= n.length) break; left -= n.length; }
+    n = n || last;
+    if (!n) return;
+    const r = document.createRange();
+    r.setStart(n, Math.min(left, n.length)); r.collapse(true);
+    const rc = r.getClientRects()[0] || r.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    if (rc.top < wr.top) wrap.scrollTop -= wr.top - rc.top + lh;
+    else if (rc.bottom > wr.bottom) wrap.scrollTop += rc.bottom - wr.bottom + lh;
+  };
   const dirty = () => {
     S.dirty = ta.value !== orig;
     ['#saveTxt', '#previewTxt', '#resetTxt'].forEach(s => $(s, box).disabled = !S.dirty);
   };
-  ta.addEventListener('input', () => { fit(); sync(); dirty(); $('#edMsg', box).innerHTML = ''; });
-  ta.addEventListener('scroll', () => { pre.scrollTop = ta.scrollTop; });
+  ta.addEventListener('input', () => { sync(); fit(); dirty(); $('#edMsg', box).innerHTML = ''; });
   ta.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (S.dirty) save(); } });
-  sync(); setTimeout(() => { fit(); align(); }, 0);
-  // 窗口 / 侧栏宽度变了、拖动改了高度、滚动条出现或消失：重新对齐
-  if (window.ResizeObserver) new ResizeObserver(align).observe(ta);
+  sync(); fit(); setTimeout(fit, 0);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);   // 字体晚到会改变折行
+  // 宽度变了（窗口、侧栏）：折行变了，重新量高度；高度跟上次设的不一样 = 用户拖了右下角
+  if (window.ResizeObserver) {
+    let lastW = 0;
+    new ResizeObserver(() => {
+      if (setH && Math.abs(wrap.offsetHeight - setH) > 2) { userSized = true; setH = wrap.offsetHeight; }
+      if (wrap.clientWidth !== lastW) { lastW = wrap.clientWidth; fit(); }
+    }).observe(wrap);
+  }
   const insert = s => {
     const a = ta.selectionStart, b = ta.selectionEnd, v = ta.value;
     const before = v.slice(0, a), after = v.slice(b);
@@ -384,8 +425,8 @@ function editBox(box, pg, at) {
     const post = after && !after.startsWith('\n') ? '\n' : '';
     ta.value = before + pre1 + s + post + after;
     const pos = (before + pre1 + s).length;
-    ta.focus(); ta.setSelectionRange(pos, pos);
-    sync(); fit(); dirty();
+    ta.focus({ preventScroll: true }); ta.setSelectionRange(pos, pos);
+    sync(); fit(); dirty(); revealCaret();
   };
   const showMsg = html => { $('#edMsg', box).innerHTML = html; };
   async function save() {

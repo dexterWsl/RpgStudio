@@ -288,10 +288,15 @@ body>header{flex:none;display:flex;align-items:center;gap:12px;padding:8px 14px;
 .cue .row:hover .lnum{opacity:1}
 
 /* 编辑框：底下一层着色，上面一层透明的 textarea */
-.editor{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--field);overflow:hidden}
-.editor pre,.editor textarea{margin:0;border:0;padding:14px 16px;font:14px/1.75 var(--font);white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;letter-spacing:0}
-.editor pre{position:absolute;inset:0;overflow:hidden;pointer-events:none;color:var(--ink)}
-.editor textarea{position:relative;display:block;width:100%;min-height:340px;resize:vertical;background:transparent;color:transparent;caret-color:var(--ink);border-radius:0;outline:none}
+/*   两层叠在 .edstack 这一个格子里，宽度一样；输入框跟着内容长高，滚动的是外面的 .editor（见 event.js editBox） */
+.editor{position:relative;border:1px solid var(--line);border-radius:12px;background:var(--field);overflow-x:hidden;overflow-y:auto;resize:vertical;min-height:120px}
+.editor .edstack{display:grid;grid-template-columns:minmax(0,1fr)}
+.editor pre,.editor textarea{grid-area:1/1;box-sizing:border-box;width:100%;min-width:0;margin:0;border:0;padding:14px 16px;font:14px/1.75 var(--font);white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;letter-spacing:0;word-spacing:0;font-kerning:none;font-variant-ligatures:none;font-feature-settings:"kern" 0,"liga" 0,"calt" 0;text-rendering:optimizeSpeed}
+.editor pre{align-self:start;overflow:visible;pointer-events:none;color:var(--ink)}
+.editor textarea{display:block;min-height:340px;resize:none;overflow:hidden;background:transparent;color:transparent;caret-color:var(--ink);border-radius:0;outline:none}
+.editor.plain pre{visibility:hidden}
+.editor.plain textarea{color:var(--ink)}
+.edplain{margin-top:6px;font-size:12px;color:var(--ink3)}
 .editor textarea::selection{background:rgba(90,169,230,.35);color:transparent}
 .editor textarea:focus{box-shadow:none}
 .editor .t-anchor{color:#7f8aa3;background:#161c27;border-radius:3px}

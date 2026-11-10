@@ -379,7 +379,8 @@ studio/
     ├─ roundtrip.js   改台词无损：node studio/test/roundtrip.js <游戏目录>
     ├─ progress.js    剧情进度自检：node studio/test/progress.js <游戏目录>
     ├─ stage.js       场景传送 / 扮演、选项条件、演出插件源码：node studio/test/stage.js <游戏目录>
-    └─ runtime.js     在真的 MZ 运行时里跑演出插件（要 playwright）：node studio/test/runtime.js <MZ 引擎来源> [--wd WD_ConditionalChoice.js]
+    ├─ runtime.js     在真的 MZ 运行时里跑演出插件（要 playwright）：node studio/test/runtime.js <MZ 引擎来源> [--wd WD_ConditionalChoice.js]
+    └─ editor.js      编辑框着色层和输入框一模一样地折行（几种缩放、宽度下点哪行改哪行；要 playwright）：node studio/test/editor.js <游戏目录>
 ```
 
 改一句台词时数据怎么走：
