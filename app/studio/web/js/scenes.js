@@ -30,8 +30,15 @@ async function sceneDialog(opts = {}, st = null) {
       ${placing ? `<div class="scexist"><span>场景「${esc(opts.sceneName || '')}」</span><button type="button" class="small" id="scPlayExisting">▶ 播放这个场景</button></div>` : `<div class="scbody">
         <div class="scleft">
           <div class="fgrid"><label for="scName">名字</label><input id="scName" maxlength="40" placeholder="比如：图书馆的夜谈" value="${esc(st.name)}"></div>
-          <div class="csec"><span class="csec-t">谁说什么</span><span class="faint">一行一句「名字：台词」；「#图 图片名」从这句开始显示 CG，「#清图」关掉；「#选项 去 | 不去」下面每行用 #1 #2 开头</span></div>
-          <div class="scchips">${actors.map(a => `<button type="button" class="small" data-sa="${esc(a.name)}">${esc(a.name)}</button>`).join('')}<button type="button" class="small" id="scPicBtn">插入 CG…</button><button type="button" class="small" data-sins="#清图">#清图</button></div>
+          <div class="csec"><span class="csec-t">谁说什么</span><span class="faint">点名字插一句「名字：」；一行一句「名字：台词」，「#选项 去 | 不去」下面每行用 #1 #2 开头</span></div>
+          <div class="scchips scpeople">${actors.map(a => `<button type="button" class="small" data-sa="${esc(a.name)}">${esc(a.name)}</button>`).join('')}</div>
+          <div class="csec"><span class="csec-t">插点别的</span><span class="faint">不占对话框，插在要发生的位置；「#清图」关掉还在显示的 CG</span></div>
+          <div class="scchips sctools">
+            <button type="button" class="small" id="scPicBtn" data-ins="pic" aria-expanded="false">插入 CG…</button>
+            <button type="button" class="small" id="scItemBtn" data-ins="item" aria-expanded="false">插入物品…</button>
+            <button type="button" class="small" id="scVarBtn" data-ins="var" aria-expanded="false">插入变量…</button>
+            <button type="button" class="small" data-sins="#清图">#清图</button>
+          </div>
           <div id="scPics" class="picture-picker scpics" hidden></div>
           <textarea id="scText" rows="12" placeholder="老船长：今晚的海很安静。&#10;#图 cg_harbor&#10;小鱼：嗯……&#10;#清图">${esc(st.text)}</textarea>
         </div>
@@ -84,28 +91,54 @@ async function sceneDialog(opts = {}, st = null) {
       if (ta) {
         $$('[data-sa]', d).forEach(b => b.onclick = () => insert(b.dataset.sa + '：'));
         $$('[data-sins]', d).forEach(b => b.onclick = () => insert(b.dataset.sins + '\n'));
-        $('#scPicBtn', d).onclick = async () => {
-          const box = $('#scPics', d);
-          box.hidden = !box.hidden;
-          if (box.hidden) return;
-          const search = $('input', box);
-          if (search) { search.focus(); return; }
-          const button = $('#scPicBtn', d);
-          button.disabled = true;
-          box.textContent = '正在读取图片…';
+        // 插入工具（CG / 物品 / 变量）共用下面这块选择区：点一下展开，选完插到光标处，再点一次收起
+        const pickBox = $('#scPics', d);
+        let pickKind = '';
+        const closePick = () => {
+          pickKind = '';
+          if (pickBox) { pickBox.hidden = true; pickBox.innerHTML = ''; }
+          $$('[data-ins]', d).forEach(b => { b.classList.remove('on'); b.setAttribute('aria-expanded', 'false'); });
+        };
+        const openPick = async (kind, button) => {
+          if (!pickBox) return;
+          if (pickKind === kind) { closePick(); return; }
+          pickKind = kind;
+          $$('[data-ins]', d).forEach(b => { const on = b === button; b.classList.toggle('on', on); b.setAttribute('aria-expanded', String(on)); });
+          pickBox.hidden = false;
+          pickBox.textContent = '正在读取…';
           try {
-            const { names } = await api('images?sub=pictures');
-            if (box.isConnected) mountPicturePicker(box, names, name => {
-              insert('#图 ' + name + '\n');
-              box.hidden = true;
-            });
+            if (kind === 'pic') {
+              const { names } = await api('images?sub=pictures');
+              if (pickKind !== 'pic') return;
+              if (!names.length) { pickBox.innerHTML = '<div class="dim">这个工程的 img/pictures 里还没有图</div>'; return; }
+              mountPicturePicker(pickBox, names, name => { insert('#图 ' + name + '\n'); closePick(); });
+              return;
+            }
+            const rows = await lookup(kind);
+            if (pickKind !== kind) return;
+            const label = kind === 'item' ? '物品' : '变量';
+            const list = rows.filter(r => r.name);
+            if (!list.length) { pickBox.innerHTML = '<div class="dim">这个工程里还没有' + label + '</div>'; return; }
+            pickBox.innerHTML = '<div class="picture-filters"><input type="search" placeholder="搜索' + label + '（共 ' + list.length + ' 个）"></div><div class="insgrid"></div>';
+            const q = $('input', pickBox), grid = $('.insgrid', pickBox);
+            const draw = () => {
+              const s = q.value.trim().toLowerCase();
+              const hit = list.filter(r => !s || String(r.name).toLowerCase().includes(s) || String(r.id) === s).slice(0, 400);
+              grid.innerHTML = hit.map(r => '<button type="button" data-ins-row="' + r.id + '" title="' + r.id + ' ' + esc(r.name) + '"><span class="dim">' + r.id + '</span> ' + esc(r.name) + '</button>').join('') || '<div class="dim">没有符合的</div>';
+              $$('[data-ins-row]', grid).forEach(b => b.onclick = () => {
+                const row = list.find(x => String(x.id) === b.dataset.insRow);
+                if (!row) return;
+                insert(kind === 'item' ? '#物品 ' + row.name + ' +1\n' : '#变量 ' + row.name + ' + 1\n');
+                closePick();
+              });
+            };
+            q.oninput = draw; draw(); q.focus();
           } catch (e) {
-            box.hidden = true;
-            if (box.isConnected) err(e.message);
-          } finally {
-            button.disabled = false;
+            closePick();
+            if (pickBox.isConnected) err(e.message);
           }
         };
+        $$('[data-ins]', d).forEach(b => b.onclick = () => { openPick(b.dataset.ins, b); });
         if (!placing) ($('#scName', d).value ? ta : $('#scName', d)).focus();
       }
       const snap = () => ({

@@ -260,6 +260,8 @@ function editBox(box, pg, at) {
       <span class="sp"></span>
       <button class="small" id="insPic">插入图片</button>
       <button class="small" id="insSay">插入人物</button>
+      <button class="small" id="insItem">插入物品</button>
+      <button class="small" id="insVar">插入变量</button>
     </div>
     <div id="edMsg"></div>
     <details class="helpbox"><summary>写法</summary><table>
@@ -351,6 +353,8 @@ function editBox(box, pg, at) {
   };
   $('#insPic', box).onclick = async () => { const n = await pickDialog('插入图片', 'images?sub=pictures', true); if (n) insert('#图 ' + n); };
   $('#insSay', box).onclick = async () => { const n = await pickDialog('插入人物', 'lookup?kind=actor'); if (n) insert(n + '：'); };
+  $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
+  $('#insVar', box).onclick = async () => { const n = await pickDialog('插入变量', 'lookup?kind=var'); if (n) insert('#变量 ' + n + ' + 1'); };
 }
 
 
