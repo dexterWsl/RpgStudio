@@ -2,7 +2,7 @@
 // 回想房：总览、挑已有剧情加回想（完整播放 / 只看图）、解锁、重新复制、拿掉
 //   module.exports = ctx => ({ get, post })：get[路由](T, q, req) 返回 JSON；post[路由](T, body)
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
-const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js');
+const { need, int, clone, END, blankPage } = require('../lib/util.js');
 const { ROOM_TAG } = require('../core/gallery.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;

@@ -8,22 +8,6 @@ function loadSheet(name) {
   if (!charCache.has(name)) charCache.set(name, new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = img('characters', name); }));
   return charCache.get(name);
 }
-// 行走图里取一帧：普通图 4×2 个角色、每个 3×4 帧；$ 开头的是单个角色
-async function paintSprite(el, image, cell) {
-  if (!image || !image.characterName) return false;
-  const sheet = await loadSheet(image.characterName);
-  if (!sheet) return false;
-  const single = /^[!]*\$/.test(image.characterName);
-  const fw = sheet.naturalWidth / (single ? 3 : 12), fh = sheet.naturalHeight / (single ? 4 : 8);
-  const ci = single ? 0 : image.characterIndex || 0;
-  const col = (ci % 4) * 3 + (image.pattern == null ? 1 : image.pattern);
-  const row = Math.floor(ci / 4) * 4 + Math.max(0, (image.direction || 2) / 2 - 1);
-  const s = cell / Math.max(fw, fh);
-  el.style.backgroundImage = `url("${sheet.src}")`;
-  el.style.backgroundSize = `${sheet.naturalWidth * s}px ${sheet.naturalHeight * s}px`;
-  el.style.backgroundPosition = `${-col * fw * s + (cell - fw * s) / 2}px ${-row * fh * s + (cell - fh * s)}px`;
-  return true;
-}
 const tileImgCache = new Map();
 const loadTileSheet = name => {
   if (!name) return Promise.resolve(null);

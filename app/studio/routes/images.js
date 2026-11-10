@@ -30,6 +30,5 @@ module.exports = function (ctx) {
         return { raw: { status: 200, type, headers: { 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=300' }, body: fs.readFileSync(f) } };
       },
     },
-    post: {},
   };
 };

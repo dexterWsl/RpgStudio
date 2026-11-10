@@ -44,24 +44,40 @@ function createStore(project, opts = {}) {
   }
 
   // 原文件是不是 RPG Maker 编辑器那种「一条一行」的排版；新文件照 styleOf 那个文件
+  //   先按整份内容核对（照两种写法重写一遍，跟原文一样就是那一种）；都对不上（别的工具写的）再看开头
   function isPretty(name) {
-    try { return /^\uFEFF?[[{]\r?\n/.test(fs.readFileSync(P.file(name), 'utf8').slice(0, 64)); } catch { return null; }
+    let raw;
+    try { raw = fs.readFileSync(P.file(name), 'utf8').replace(/^\uFEFF/, ''); } catch { return null; }
+    try {
+      const d = JSON.parse(raw);
+      if (rmStringify(d) === raw) return true;
+      if (JSON.stringify(d) === raw) return false;
+    } catch { }
+    return /^[[{]\r?\n/.test(raw.slice(0, 64));
   }
-  function write(name, data, styleOf) {
+  const tmpName = f => f + '.tmp-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
+  // 写到临时文件（还没替换原文件）
+  function stage(name, data, styleOf) {
     const f = P.file(name);
     let pretty = isPretty(name);
     if (pretty == null) pretty = styleOf ? !!isPretty(styleOf) : opts.prettyNew !== false;
     const text = pretty ? rmStringify(data) : JSON.stringify(data);
     JSON.parse(text);   // 写之前确认能读回来
-    const tmp = f + '.tmp-' + process.pid;
+    const tmp = tmpName(f);
     fs.writeFileSync(tmp, text, 'utf8');
-    fs.renameSync(tmp, f);
+    return { name, f, tmp };
+  }
+  function write(name, data, styleOf) {
+    const s = stage(name, data, styleOf);
+    fs.renameSync(s.tmp, s.f);
     P.invalidate(name);
   }
 
   // mutate(docs) 可以返回任意值，会原样返回给调用方；抛错 = 不写
   //   eo.create：允许不存在的文件（新建）；eo.styleOf：新文件照哪个文件的排版
   //   mutate 里把 docs[文件] 设成 undefined = 删掉这个文件（先备份）
+  // 几个文件一起改要么全成、要么全不动：先全部写成临时文件，都写好了再一个个换上去；
+  // 换到一半出错（被占用、磁盘满），已经换上去的从备份里拿回来
   function edit(files, mutate, eo = {}) {
     files = [...new Set(files)];
     const creatable = new Set(eo.create || []);
@@ -75,9 +91,28 @@ function createStore(project, opts = {}) {
     const changed = files.filter(f => JSON.stringify(docs[f]) !== JSON.stringify(P.read(f)));
     if (!changed.length) return { changed: [], result };
     const backupDir = backup(changed);
+    const staged = [];
+    try {
+      for (const f of changed) if (docs[f] !== undefined) staged.push(stage(f, docs[f], eo.styleOf));
+    } catch (e) {
+      for (const s of staged) fs.rmSync(s.tmp, { force: true });
+      throw e;
+    }
+    const done = [];
+    try {
+      for (const s of staged) { fs.renameSync(s.tmp, s.f); done.push(s.name); }
+    } catch (e) {
+      for (const s of staged) fs.rmSync(s.tmp, { force: true });
+      for (const name of done) {
+        const saved = path.join(backupDir, name);
+        try { if (fs.existsSync(saved)) fs.copyFileSync(saved, P.file(name)); else fs.rmSync(P.file(name), { force: true }); } catch { }
+      }
+      for (const f of changed) P.invalidate(f);
+      throw e;
+    }
     for (const f of changed) {
-      if (docs[f] === undefined) { try { fs.unlinkSync(P.file(f)); } catch { } P.invalidate(f); }
-      else write(f, docs[f], eo.styleOf);
+      if (docs[f] === undefined) { try { fs.unlinkSync(P.file(f)); } catch { } }
+      P.invalidate(f);
     }
     if (opts.onWrite) { try { opts.onWrite(changed); } catch (e) { console.error('[studio] onWrite: ' + e.message); } }
     return { changed, backupDir, result };

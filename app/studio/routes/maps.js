@@ -2,7 +2,7 @@
 // 地图：地图信息、图块编辑、新建 / 改属性 / 删除地图
 //   module.exports = ctx => ({ get, post })：get[路由](T, q, req) 返回 JSON；post[路由](T, body)
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
-const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js');
+const { need, int, clone, UserError } = require('../lib/util.js');
 const Maps = require('../core/maps.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;

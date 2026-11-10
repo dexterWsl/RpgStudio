@@ -21,39 +21,19 @@ module.exports = function (ctx) {
     if (m.type === 'map') return null;
     return { type: m.type, segs: m.type === 'switches' ? ['开始', ...m.chain.map(c => c.label)] : m.segs.map(s => s.label), slots: (m.slots || []).map(s => s.label) };
   }
-  const fileOf = at => (at.type === 'map' ? project.mapFile(at.map) : 'CommonEvents.json');
-  const target = at => {
-    at = at || {};
-    if (at.type === 'map') return { type: 'map', map: int(at.map, '地图编号不对'), ev: int(at.ev, '事件编号不对'), page: int(at.page || 0, '页码不对') };
-    if (at.type === 'ce') return { type: 'ce', ce: int(at.ce, '公共事件编号不对') };
-    throw new UserError('缺少位置');
-  };
-  function holderOf(docs, at) {
-    if (at.type === 'map') {
-      const e = ((docs[project.mapFile(at.map)] || {}).events || [])[at.ev];
-      need(e && e.pages[at.page], '这一页不存在');
-      return e.pages[at.page];
-    }
-    const c = (docs['CommonEvents.json'] || [])[at.ce];
-    need(c, '公共事件 ' + at.ce + ' 不存在');
-    return c;
-  }
+  // 位置（lib/at.js）
+  const { fileOf, branchRange } = ctx.at;
+  const target = at => ctx.at.parse(at);
+  const holderOf = (docs, at) => ctx.at.locate(docs, at).holder;
   const sceneOf = (docs, id) => {
     const c = (docs['CommonEvents.json'] || [])[id];
     need(c && isMarked(c.list), '场景 ' + id + ' 不存在');
     return c;
   };
-  // 选项分支的范围：402 那一行之后、同缩进的下一个 402 / 403 / 404 之前
-  function branchRange(list, line) {
-    const head = list[line];
-    need(head && head.code === 402, '第 ' + (line + 1) + ' 条不是「选了 …」');
-    const ind = head.indent || 0;
-    let end = line + 1;
-    while (end < list.length && !(list[end] && (list[end].indent || 0) === ind && [402, 403, 404].includes(list[end].code))) end++;
-    return { ind, start: line + 1, end };
-  }
 
-  function place(T, b, id) {
+  // 放到地图上：先把参数核对好（不写盘），返回 put(docs, id, 名字) —— 在 store.edit 里把事件放上去
+  //   新建场景顺便放到地图上时，场景和地图上的事件在同一次写盘里：要么都成，要么都不动
+  function placement(T, b) {
     const mapId = int(b.map, '地图编号不对'), x = int(b.x, '坐标不对'), y = int(b.y, '坐标不对');
     const trigger = int(b.trigger == null ? 0 : b.trigger);
     need([0, 1, 2, 3].includes(trigger), '触发方式不对');
@@ -63,21 +43,28 @@ module.exports = function (ctx) {
     const seg = b.seg == null || b.seg === '' ? null : int(b.seg), slot = b.slot == null || b.slot === '' ? -1 : int(b.slot);
     const advanceTo = b.advanceTo == null || b.advanceTo === '' ? null : int(b.advanceTo, '推进到哪一段不对');
     if (advanceTo != null) need(seg == null || advanceTo > seg, '只能往后推进');
-    const { pages, until, advance } = T.scenes.placementPages({ scene: id, seg, slot, trigger, once, exact: b.exact !== false, image, advanceTo });
-    if (advanceTo != null) need(advance, '推进到哪一段不对');
-    let evId = 0;
-    T.store.edit([project.mapFile(mapId), 'CommonEvents.json'], docs => {
-      const sc = sceneOf(docs, id);
-      const m = docs[project.mapFile(mapId)];
+    const pagesFor = id => T.scenes.placementPages({ scene: id, seg, slot, trigger, once, exact: b.exact !== false, image, advanceTo });
+    if (advanceTo != null) need(pagesFor(0).advance, '推进到哪一段不对');
+    const file = project.mapFile(mapId);
+    const out = { map: mapId, ev: 0, until: '', once, advance: '' };
+    function put(docs, id, name) {
+      const m = docs[file];
       need(m, '地图 ' + mapId + ' 不存在');
       need(x >= 0 && y >= 0 && x < m.width && y < m.height, `坐标 (${x}, ${y}) 在地图外面（地图 ${m.width}×${m.height}）`);
       need(!(m.events || []).some(e => e && e.x === x && e.y === y), `(${x}, ${y}) 已经有事件了：换一个空格子，或者在那个事件的选项里关联这个场景`);
-      evId = m.events.findIndex((e, i) => i > 0 && !e);
+      let evId = m.events.findIndex((e, i) => i > 0 && !e);
       if (evId < 0) evId = Math.max(1, m.events.length);
-      const name = String(b.name || sc.name || '场景').trim().slice(0, 40);
-      m.events[evId] = { id: evId, name, note: '', pages: clone(pages), x, y };
-    });
-    return { map: mapId, ev: evId, until, once, advance };
+      const { pages, until, advance } = pagesFor(id);
+      m.events[evId] = { id: evId, name: String(b.name || name || '场景').trim().slice(0, 40), note: '', pages: clone(pages), x, y };
+      Object.assign(out, { ev: evId, until, advance });
+      return out;
+    }
+    return { file, put, out };
+  }
+  function place(T, b, id) {
+    const pl = placement(T, b);
+    T.store.edit([pl.file, 'CommonEvents.json'], docs => pl.put(docs, id, sceneOf(docs, id).name));
+    return pl.out;
   }
 
   // 编辑框里的字先合并成指令（不写盘），再翻成步骤
@@ -126,15 +113,15 @@ module.exports = function (ctx) {
         catch (e) { throw new UserError(e.message); }
         const v = T.validator.newProblems(base, merged.list);
         if (v.fresh.length) throw new UserError('台词里有写法问题：' + v.fresh.slice(0, 4).map(e => e.msg).join('；'), { problems: v.fresh });
-        let id = 0;
-        T.store.edit(['CommonEvents.json'], docs => {
+        const pl = b.place ? placement(T, b.place) : null;   // 先核对放哪（不对就什么都不写）
+        let id = 0, placed = null;
+        T.store.edit(['CommonEvents.json', ...(pl ? [pl.file] : [])], docs => {
           const arr = docs['CommonEvents.json'];
           id = arr.findIndex((c, i) => i > 0 && c && !String(c.name || '').trim() && (c.list || []).length <= 1 && !c.trigger);
           if (id < 0) { id = arr.length; arr.push(null); }
           arr[id] = { id, list: merged.list, name, switchId: 1, trigger: 0 };
+          if (pl) placed = pl.put(docs, id, name);
         });
-        let placed = null;
-        if (b.place) placed = place(tools(), b.place, id);
         return { id, placed, ...listOut(tools()) };
       },
       'scene/place'(T, b) {

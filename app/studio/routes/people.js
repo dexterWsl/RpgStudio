@@ -2,7 +2,7 @@
 // 人物和小人：人物列表 / 人物页、新建改人物、手动关联、给人物新建数值、存行走图 / 头像
 //   module.exports = ctx => ({ get, post })：get[路由](T, q, req) 返回 JSON；post[路由](T, body)
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
-const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js');
+const { need, int, UserError } = require('../lib/util.js');
 const { writeLinks } = require('../core/people.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;

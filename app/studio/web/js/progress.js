@@ -413,6 +413,9 @@ async function mountWorkspaceMap() {
 function hideWorkspaceSide() { const s = $('#pwSide'); if (s) { s.hidden = true; s.innerHTML = ''; s.parentElement.classList.remove('withside'); } }
 // 右边：点中了事件就显示事件；没点中、开着「事件顺序」就显示这一天的事件顺序
 function drawSide() {
+  // 右栏正在改台词：换内容前先问
+  if (S.dirty && !confirm('右边改的台词还没保存，换内容会丢掉。确定？')) return;
+  S.dirty = false;
   if (PW.sel && PW.sel.ce) return showWorkspaceCe(PW.sel.ce, PW.sel.label || '');
   if (PW.sel && PW.sel.map === PW.map) return showWorkspaceEvent(PW.sel.ev, null);
   if (PW.orderOpen && PW.order) return showOrder();

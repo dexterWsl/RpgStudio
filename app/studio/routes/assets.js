@@ -88,7 +88,7 @@ function classify(rel, kind, size, w, h) {
 
 module.exports = function (ctx) {
   const { project } = ctx;
-  const maxUpload = () => { const m = ctx.opts.projects && ctx.opts.projects.maxUpload; return Number(typeof m === 'function' ? m() : m) || 2 * 1024 * 1024 * 1024; };
+  const maxUpload = ctx.maxUpload;
   // 不同服务、用户工作区和工程各自暂存，不能互相读、覆盖或清理。
   const stageRoot = () => path.join(ctx.opts.assetsDir || ROOT, ctx.projectKey());
   const stageDir = id => { need(/^[a-z0-9]{6,32}$/.test(String(id || '')), '暂存区不对'); return path.join(stageRoot(), id); };

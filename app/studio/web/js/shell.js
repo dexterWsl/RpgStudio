@@ -14,7 +14,11 @@ window.addEventListener('hashchange', () => {
 });
 window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-async function render() {
+// 重画当前页。有还没保存的修改（台词、图块）时先问一句：切进度、改名、保存别的东西都会整页重画，不问就丢了
+//   o.force = 不问（调用的地方已经问过 / 已经存好了）
+async function render(o = {}) {
+  if (S.dirty && !o.force && !confirm('有还没保存的修改，重新显示这一页会丢掉。确定？')) return;
+  S.dirty = false;
   const r = route();
   document.body.classList.toggle('project-picker', r.name === 'projects');
   document.title = r.name === 'projects' ? '选择游戏 · rpgStudio' : ((S.project && S.project.title) ? S.project.title + ' · rpgStudio' : 'rpgStudio');

@@ -17,7 +17,7 @@ const Blank = require('../core/blank.js');
 module.exports = function (ctx) {
   const reg = ctx.registry;
   const off = () => need(reg, '这个服务没有打开工程列表（只有本机版 / 编辑器里有）');
-  const maxUpload = () => { const m = ctx.opts.projects && ctx.opts.projects.maxUpload; return Number(typeof m === 'function' ? m() : m) || 4 * 1024 * 1024 * 1024; };
+  const maxUpload = ctx.maxUpload;
   const view = () => {
     off();
     const cur = reg.current();

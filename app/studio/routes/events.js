@@ -62,30 +62,9 @@ module.exports = function (ctx) {
   }
 
   // ---------- 写 ----------
-  function locate(docs, at) {
-    if (at.type === 'map') {
-      const doc = docs[project.mapFile(at.map)];
-      need(doc, '地图 ' + at.map + ' 不存在');
-      const e = (doc.events || [])[at.ev];
-      need(e, `地图 ${at.map} 里没有事件 ${at.ev}`);
-      const pg = e.pages[at.page];
-      need(pg, `事件 ${at.ev} 没有第 ${at.page + 1} 页`);
-      return { holder: pg, doc, event: e };
-    }
-    if (at.type === 'ce') {
-      const c = (docs['CommonEvents.json'] || [])[at.ce];
-      need(c, '公共事件 ' + at.ce + ' 不存在');
-      return { holder: c };
-    }
-    throw new UserError('不认识的位置');
-  }
-  const fileOf = at => (at.type === 'map' ? project.mapFile(at.map) : 'CommonEvents.json');
-  const target = b => {
-    const at = b.at || {};
-    if (at.type === 'map') return { type: 'map', map: int(at.map, '地图编号不对'), ev: int(at.ev, '事件编号不对'), page: int(at.page || 0, '页码不对') };
-    if (at.type === 'ce') return { type: 'ce', ce: int(at.ce, '公共事件编号不对') };
-    throw new UserError('缺少位置');
-  };
+  // 位置（lib/at.js）：请求里的 at → 哪个文件 → 读出来的文件里的那一页
+  const { fileOf, locate } = ctx.at;
+  const target = b => ctx.at.parse(b.at);
   const problemText = list => list.slice(0, 6).map(e => `第 ${e.line + 1} 条：${e.msg}`).join('；');
 
   function saveText(T, b) {
