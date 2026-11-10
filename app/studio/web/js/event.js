@@ -300,23 +300,37 @@ function editBox(box, pg, at) {
   const inScene = !!pg.isScene;   // 场景（公共事件带场景标记）：能 #扮演、#传送 选人，播完自动换回主角
   const clearHint = P.pictures.clearAll === 'script' ? `关闭全部剧情图片（${P.pictures.min}~${P.pictures.max} 号）` : '关闭这一页里还在显示的图';
   box.innerHTML = `
+    <div class="edtop">
+      <div class="edmode"><div class="seg" role="tablist" aria-label="编辑方式">
+          <button type="button" data-mode="blocks" title="一块块地改：台词直接改字，传送 / 变量这些是按钮，选项和条件能折叠">规范</button>
+          <button type="button" data-mode="text" title="整页文字，按写法直接打">文本</button>
+        </div>
+        <div class="edins" role="toolbar" aria-label="插入"><span class="edins-k">插入</span>
+          <button class="small" id="insSay" title="一句台词（选说话的人）">台词</button>
+          <button class="small" id="insChoice" title="一组选项，每个选项下面写各自的内容">选项</button>
+          <button class="small" id="insIf" title="条件分支：如果 … 否则 …">如果</button>
+          <button class="small" id="insTp" title="传送：在地图上点要去的格子">传送</button>
+          <button class="small" id="insScene" title="在这里播另一个场景 / 公共事件">场景</button>
+          <button class="small" id="insVar">变量</button>
+          <button class="small" id="insSwitch">开关</button>
+          <button class="small" id="insItem">物品</button>
+          <button class="small" id="insPic">图片</button>
+          ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">扮演</button>' : ''}
+          <button class="small" id="insFloat" title="字从人物头上飘起来">飘字</button>
+          <button class="small" id="insAct" title="人物走几步、转身、冒气泡（移动路线）">动作</button>
+          <button class="small quiet" id="blkUndo" title="撤销（Ctrl+Z）">撤销</button>
+        </div>
+      </div>
+      <div class="dim edhint" id="edHint"></div>
+    </div>
+    <div class="blocks" id="blocks" tabindex="-1" hidden></div>
     <div class="editor"><div class="edstack"><pre aria-hidden="true"></pre><textarea spellcheck="false" aria-label="台词"></textarea></div></div>
     <div class="edplain" hidden>这台电脑上着色层和输入框的折行对不上，先关掉了颜色，免得看着改这一行、其实改到别的行（不影响保存）。</div>
     <div class="edbar">
       <button class="primary" id="saveTxt" disabled>保存台词</button>
       <button id="previewTxt" disabled>先看看会改什么</button>
       <button class="quiet" id="resetTxt" disabled>放弃修改</button>
-      <span class="sp"></span>
-      <button class="small" id="insPic">插入图片</button>
-      <button class="small" id="insSay">插入人物</button>
-      <button class="small" id="insItem">插入物品</button>
-      <button class="small" id="insVar">插入变量</button>
-      <button class="small" id="insSwitch">插入开关</button>
-      <button class="small" id="insScene">插入场景</button>
-      <button class="small" id="insTp">插入传送</button>
-      ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">插扮演</button>' : ''}
-      <button class="small" id="insFloat">插飘字</button>
-      <button class="small" id="insAct">插动作</button>
+      <span class="sp"></span><span class="dim" style="font-size:12.5px">Ctrl+S 保存</span>
     </div>
     <div id="edMsg"></div>
     <details class="helpbox"><summary>写法</summary><table>
@@ -418,7 +432,32 @@ function editBox(box, pg, at) {
       if (wrap.clientWidth !== lastW) { lastW = wrap.clientWidth; fit(); }
     }).observe(wrap);
   }
+  // ---------- 规范 / 文本 两种样子：同一份文字（ta.value） ----------
+  const blocksHost = $('#blocks', box);
+  let blocks = null, mode = 'blocks';
+  try { mode = localStorage.getItem('studio.editMode') === 'text' ? 'text' : 'blocks'; } catch { }
+  const setMode = m => {
+    mode = m;
+    try { localStorage.setItem('studio.editMode', m); } catch { }
+    $$('.edmode [data-mode]', box).forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+    blocksHost.hidden = m !== 'blocks';
+    $('#blkUndo', box).hidden = m !== 'blocks';
+    wrap.hidden = m === 'blocks';
+    plainNote.hidden = m === 'blocks' || !wrap.classList.contains('plain');
+    if (m === 'blocks') {
+      if (!blocks) blocks = mountBlocks(blocksHost, { get: () => ta.value, set: v => { ta.value = v; dirty(); }, scene: inScene, mapId: at && at.type === 'map' ? at.map : 0, nameBox: !!P.nameBox, hintEl: $('#edHint', box) });
+      else blocks.reload();
+    } else {
+      if (blocks) { blocks.destroy(); }
+      $('#edHint', box).textContent = '按写法直接打；「写法」里有全部写法';
+      sync(); fit();
+    }
+  };
+  $$('.edmode [data-mode]', box).forEach(b => b.onclick = () => { if (b.dataset.mode !== mode) setMode(b.dataset.mode); });
+  $('#blkUndo', box).onclick = () => { if (blocks) blocks.undo(); };
+  box.addEventListener('keydown', e => { if (mode === 'blocks' && (e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (S.dirty) save(); } });
   const insert = s => {
+    if (mode === 'blocks' && blocks) { blocks.insert(s); return; }
     const a = ta.selectionStart, b = ta.selectionEnd, v = ta.value;
     const before = v.slice(0, a), after = v.slice(b);
     const pre1 = before && !before.endsWith('\n') ? '\n' : '';
@@ -430,6 +469,7 @@ function editBox(box, pg, at) {
   };
   const showMsg = html => { $('#edMsg', box).innerHTML = html; };
   async function save() {
+    if (mode === 'blocks' && blocks) blocks.clean();   // 规范模式里插了台词又没写字的空行：不存
     $('#saveTxt', box).disabled = true;
     const sent = ta.value;   // 发出去的那一份：等回来的时候又打了字，就不重画（不然新打的字没了）
     try {
@@ -442,12 +482,14 @@ function editBox(box, pg, at) {
       render({ force: true });
     } catch (e) {
       showMsg(`<div class="err">${esc(e.message)}</div>`);
+      if (mode === 'blocks' && blocks) blocks.flag(e.message);
       dirty();
     }
   }
   $('#saveTxt', box).onclick = save;
-  $('#resetTxt', box).onclick = () => { ta.value = orig; sync(); fit(); dirty(); showMsg(''); };
+  $('#resetTxt', box).onclick = () => { ta.value = orig; sync(); fit(); dirty(); showMsg(''); if (mode === 'blocks' && blocks) blocks.reload(); };
   $('#previewTxt', box).onclick = async () => {
+    if (mode === 'blocks' && blocks) blocks.clean();
     try {
       const r = await api('preview', { at, text: ta.value });
       showMsg(`<div class="card previewbox"><h3>${r.unchanged ? '和原来一模一样，保存不会改任何数据' : '保存后这一页会变成这样'}${r.problems.length ? '' : ''}</h3>
@@ -457,6 +499,8 @@ function editBox(box, pg, at) {
   };
   $('#insPic', box).onclick = async () => { const n = await pickDialog('插入图片', 'images?sub=pictures', true); if (n) insert('#图 ' + n); };
   $('#insSay', box).onclick = async () => { const n = await pickDialog('插入人物', 'lookup?kind=actor'); if (n) insert(n + '：'); };
+  $('#insChoice', box).onclick = async () => { const t = await choiceBuilder(); if (t) insert(t); };
+  $('#insIf', box).onclick = async () => { const c = await ifBuilder(); if (c) insert('#如果 ' + c + '\n#结束'); };
   $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
   $('#insVar', box).onclick = async () => { const n = await pickDialog('插入变量', 'lookup?kind=var'); if (n) insert('#变量 ' + n + ' + 1'); };
   $('#insSwitch', box).onclick = async () => { const n = await pickDialog('插入开关', 'lookup?kind=switch'); if (n) insert('#开关 ' + n + ' 开'); };
@@ -468,6 +512,7 @@ function editBox(box, pg, at) {
   if (inScene) $('#insAs', box).onclick = async () => { const l = await asDialog(); if (l) insert(l); };
   $('#insFloat', box).onclick = async () => { const who = await whoDialog('飘字：字从谁头上冒出来', ['画面']); if (who) insert('#飘字 ' + who + '：'); };
   $('#insAct', box).onclick = async () => { const who = await whoDialog('动作 / 移动路线：谁动'); if (who) insert('#动作 ' + who + ' '); };
+  setMode(mode);
 }
 
 

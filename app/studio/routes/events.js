@@ -157,6 +157,34 @@ module.exports = function (ctx) {
       event: (T, q) => eventView(T, int(q('map')), int(q('ev'))),
       ces: T => ({ ces: ceList(T) }),
       ce: (T, q) => ceView(T, int(q('id'))),
+      // 规范模式用（只读，不写盘）：
+      //   line/parse?text=一行          这一行的写法解析成什么（名字已经换成编号）；写错了给 error
+      //   choice/needs?labels=[…]        几个选项文字各自的条件：要满足什么才能选 / 才显示（人话 + 条件写法）
+      //   choice/relabel?label=&lockNeed=&hideNeed=   按「要满足什么」重写选项文字里的条件标记
+      'line/parse'(T, q) {
+        const text = String(q('text') || '').slice(0, 2000);
+        try { return { items: T.script.parseScript(text) }; } catch (e) { return { items: [], error: e.message }; }
+      },
+      'choice/needs'(T, q) {
+        let labels = [];
+        try { labels = JSON.parse(q('labels') || '[]'); } catch { throw new UserError('labels 不对'); }
+        need(Array.isArray(labels) && labels.length <= 200, 'labels 不对');
+        const nm = (kind, id) => { try { return project.name(kind, id); } catch { return ''; } };
+        return {
+          needs: labels.map(l => {
+            const c = choicecond.split(String(l == null ? '' : l));
+            const n = choicecond.needs(String(l == null ? '' : l), nm);
+            return { text: c.text, lock: n.lock, hide: n.hide, lockNeed: c.disable ? choicecond.negate(c.disable) : '', hideNeed: c.hide ? choicecond.negate(c.hide) : '' };
+          }),
+        };
+      },
+      'choice/relabel'(T, q) {
+        const clean = s => String(s == null ? '' : s).replace(/\s+/g, '');
+        const lockNeed = clean(q('lockNeed')), hideNeed = clean(q('hideNeed'));
+        for (const c of [lockNeed, hideNeed]) { const bad = choicecond.check(c); need(!bad, bad); }
+        const text = choicecond.split(String(q('label') || '')).text;
+        return { label: choicecond.join({ disable: lockNeed ? choicecond.negate(lockNeed) : '', hide: hideNeed ? choicecond.negate(hideNeed) : '', text }) };
+      },
     },
     post: {
       text: (T, b) => ({ ok: true, ...saveText(T, b) }),

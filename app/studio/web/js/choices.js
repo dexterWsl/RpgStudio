@@ -25,7 +25,8 @@ function ccBuild(rows) {
 }
 const CC_CMP = { '<=': '≤', '>=': '≥', '!=': '≠' };
 
-async function choiceCondDialog(at, line, label, cond) {
+// o.local = 不直接存盘，返回 { lockNeed, hideNeed }（规范模式里改的是编辑框的文字，跟别的修改一起保存）
+async function choiceCondDialog(at, line, label, cond, o = {}) {
   const [sws, vrs, its] = await Promise.all([lookup('switch'), lookup('var'), lookup('item')]);
   const cur = cond || {};
   // 两种条件可以同时有：这里一次改一种，另一种原样留着
@@ -99,11 +100,13 @@ async function choiceCondDialog(at, line, label, cond) {
       $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
       $('[data-ok]', d).onclick = async () => {
         sync();
+        if (o.local) { done({ need: { lockNeed: need.lock, hideNeed: need.hide } }); return; }
         try { await api('choice/cond', { at, line, lockNeed: need.lock, hideNeed: need.hide }); done({ ok: '已保存选项条件' }); }
         catch (e) { $('#ccErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }
       };
       draw();
     });
+  if (o.local) return r && r.need ? r.need : null;
   if (r && r.ok) { toast(r.ok); render(); }
 }
 document.addEventListener('click', e => {

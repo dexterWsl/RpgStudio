@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// 编辑框回归测试：着色层（pre）和输入框（textarea）必须一模一样地折行（只读，不保存）
+// 编辑框回归测试（只读，不保存）：
+//   文本模式：着色层（pre）和输入框（textarea）必须一模一样地折行
+//   规范模式：一行一块，打字、回车、插入选项 / 如果、折叠、选项条件，改的都是同一份文字
 //   node studio/test/editor.js <游戏目录>        要装 playwright（npm i playwright && npx playwright install chromium）
 // 对不齐的后果：看着在改这一行，字却进了上一行 / 下一行。以前输入框自己出滚动条，浏览器缩放不是 100% 时
 // 滚动条宽度不是整数，两层差零点几个像素就会这样。这里在几种缩放、几种宽度下：
@@ -46,6 +48,8 @@ const ok = (c, m) => { if (c) pass++; else fails.push(m); };
     await page.goto(base + '/studio#/ce/' + ce);
     await page.waitForSelector('.modebar');
     await page.click('.modebar [data-m="edit"]');
+    await page.waitForSelector('.edmode [data-mode="text"]');
+    await page.click('.edmode [data-mode="text"]');
     await page.waitForSelector('.editor textarea');
     await page.addStyleTag({ content: `.editor{width:${width}px!important}` });
     if (zoom !== 1) await page.evaluate(z => { document.documentElement.style.zoom = z; }, zoom);
@@ -107,6 +111,56 @@ const ok = (c, m) => { if (c) pass++; else fails.push(m); };
     ok(h.taScroll === 0 && Math.abs(h.ta - h.pre) < 2, '粘贴一大段以后 ' + JSON.stringify(h));
     const wrapScroll = await page.evaluate(() => document.querySelector('.editor').scrollTop);
     ok(wrapScroll > 0, '粘贴到后面：外框跟着光标滚下去了');
+    await page.close();
+  }
+  // 4. 规范模式
+  {
+    const page = await open(1, 900);
+    const T0 = ['林屿：第一句', '＋第二行', '■ 选项（2 个）：甲 / 乙', '■ 选了「<<[!s[1]]>>甲」', '│ 林屿：选了甲', '│ #传送 1 3 4 朝上', '■ 选了「乙」', '│ 林屿：选了乙', '■ 选项结束', '#变量 1 = 2'].join('\n');
+    await setText(page, T0);
+    await page.click('.edmode [data-mode="blocks"]');
+    await page.waitForSelector('#blocks .bk');
+    const text = () => page.$eval('.editor textarea', t => t.value);
+    const kinds = await page.$$eval('#blocks .bk', els => els.map(e => [...e.classList].find(c => c.startsWith('bk-') && c !== 'bk-k')));
+    ok(JSON.stringify(kinds) === JSON.stringify(['bk-say', 'bk-more', 'bk-chead', 'bk-branch', 'bk-say', 'bk-cmd', 'bk-branch', 'bk-say', 'bk-end', 'bk-cmd']), '规范模式一行一块：' + kinds.join(' '));
+    ok(await page.$eval('.bk-cmd .chip', e => e.classList.contains('c-tp') && /\(3, 4\)/.test(e.textContent)), '传送是蓝色按钮，写着去哪一格');
+    ok(!(await page.$('.bk-condbox')), '选项的条件默认收起');
+    await page.click('.bk-branch .cond-pill');
+    await page.waitForSelector('.bk-condbox b');
+    ok(/开关 1.*为开/.test(await page.$eval('.bk-condbox', e => e.textContent)), '点「条件」展开：要满足开关 1 为开');
+    // 只展开选项 2
+    await page.click('.bk-chead .opt-pill:nth-child(2)');
+    const hiddenSay = await page.$$eval('#blocks .bk[hidden]', els => els.map(e => e.textContent));
+    ok(hiddenSay.some(t => /选了甲/.test(t)) && !hiddenSay.some(t => /选了乙/.test(t)), '点「2 乙」：只展开选项 2');
+    // 打字、回车
+    await page.click('.bk-say .bk-text');
+    await page.keyboard.press('End');
+    await page.keyboard.type('呀');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('第三句');
+    ok(/林屿：第一句呀\n＋第二行\n林屿：第三句/.test(await text()), '改台词、回车 = 下一句同一个人');
+    // 选中选项 2，插一组新选项 → 在选项 2 里面；选中新选项的「选项 1」再插如果 → 不许
+    const br = await page.$$('.bk-branch');
+    await (await br[1].$('.bk-tag')).click();
+    await page.click('#insChoice');
+    await page.waitForSelector('dialog[open] .cbrow input');
+    const ins = await page.$$('dialog[open] .cbrow input');
+    await ins[0].fill('左'); await ins[1].fill('右');
+    await page.click('dialog[open] [data-ok]');
+    await page.waitForTimeout(150);
+    ok(/■ 选了「乙」\n│ #选项 左 \| 右\n│ #1\n│ #2\n│ 林屿：选了乙/.test(await text()), '选中选项 2 再插选项：插在它里面');
+    // 撤销
+    await page.click('#blkUndo');
+    ok(!/#选项 左/.test(await text()), '撤销');
+    // 删一行
+    const cmd = await page.$('.bk-cmd:last-child');
+    await cmd.hover();
+    await page.click('.bk-cmd:last-child [data-act="del"]');
+    ok(!/#变量 1 = 2/.test(await text()), '删掉一行');
+    // 切回文本模式：文字一样
+    await page.click('.edmode [data-mode="text"]');
+    ok(await page.$eval('.editor', e => !e.hidden), '切回文本模式');
+    ok(!page.errs.length, '规范模式页面报错：' + page.errs.join(' | '));
     await page.close();
   }
   await browser.close();
