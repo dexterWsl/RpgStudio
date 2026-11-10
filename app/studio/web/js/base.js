@@ -243,15 +243,29 @@ async function mountMapPicker(box, mapId, onPick) {
 }
 
 // 传送：挑地图（默认就是这张图），直接在地图上点要去的格子 → { id, name, x, y }
-async function transferDialog(defaultMapId) {
-  const maps = await lookup('map').catch(() => []);
+// 传送到哪里：选地图、在地图上点格子；返回 { id, name, x, y, dir, who, steps }，用 transferLine() 变成一行
+//   o.scene = 在场景里：还能选「谁来演」和「到了以后」（场景播完自动回到原来的地方、换回主角）；场景外只有主角自己
+async function transferDialog(defaultMapId, o = {}) {
+  const [maps, actors] = await Promise.all([lookup('map').catch(() => []), o.scene ? lookup('actor').catch(() => []) : Promise.resolve([])]);
   if (!maps.length) { toast('这个工程里还没有地图', true); return null; }
   let mapId = Number(defaultMapId) || 0;
   if (!maps.some(m => m.id === mapId)) mapId = maps[0].id;
-  let picked = null, name = (maps.find(m => m.id === mapId) || {}).name || '';
-  return openDialog(`<header><h3>传送到哪里</h3><button class="quiet small" data-x>关闭</button></header>
+  let picked = null, name = '';
+  // 编辑框里写地图名：名字唯一才写名字，不然写编号（跟服务端的 refText 一个规矩）
+  const ref = id => {
+    const m = maps.find(x => x.id === id), n = String((m && m.name) || '').trim();
+    return n && !/^\d+$/.test(n) && maps.filter(x => String(x.name || '').trim() === n).length === 1 ? n : String(id);
+  };
+  const names = actors.map(a => String(a.name || '').trim()).filter(Boolean);
+  return openDialog(`<header><h3>${o.scene ? '场景里传送到哪里' : '传送到哪里'}</h3><button class="quiet small" data-x>关闭</button></header>
     <div class="dbody">
-      <div class="fgrid"><label for="tpmap">地图</label><select id="tpmap">${maps.map(m => `<option value="${m.id}" ${m.id === mapId ? 'selected' : ''}>${m.id} ${esc(m.name || '（没名字）')}</option>`).join('')}</select></div>
+      <div class="fgrid">
+        <label for="tpmap">地图</label><select id="tpmap">${maps.map(m => `<option value="${m.id}" ${m.id === mapId ? 'selected' : ''}>${m.id} ${esc(m.name || '（没名字）')}</option>`).join('')}</select>
+        ${o.scene ? `<label for="tpwho">谁来演</label><select id="tpwho"><option value="">主角（不换人）</option>${names.map(n => `<option>${esc(n)}</option>`).join('')}</select>` : ''}
+        <label for="tpdir">到了朝</label><select id="tpdir"><option value="">不变</option>${['上', '下', '左', '右'].map(d => `<option>${d}</option>`).join('')}</select>
+        ${o.scene ? '<label for="tpsteps">到了以后</label><input id="tpsteps" placeholder="可以不写；比如 前进3 或 下2 转身">' : ''}
+      </div>
+      <div class="fnote">${o.scene ? '场景里的传送只在这个场景里算数：场景播完，主角自动回到进场景前的地方、换回原来的样子。' : '主角传送过去（场景外的传送就是主角自己）。'}</div>
       <div class="tpbox" id="tpbox"></div>
     </div>
     <footer><span class="sp"></span><span class="dim" id="tphint">在地图上点一下要去的格子</span><button data-x>取消</button><button class="primary" data-ok disabled>就是这一格</button></footer>`,
@@ -260,7 +274,8 @@ async function transferDialog(defaultMapId) {
       d.addEventListener('close', () => d.classList.remove('dlg-wide'), { once: true });
       const sel = $('#tpmap', d), box = $('#tpbox', d), ok = $('[data-ok]', d), hint = $('#tphint', d);
       $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
-      const fire = () => { if (picked) done({ id: mapId, name, x: picked.x, y: picked.y }); };
+      const val = id => { const el = $(id, d); return el ? el.value.trim() : ''; };
+      const fire = () => { if (picked) done({ id: mapId, name: ref(mapId), x: picked.x, y: picked.y, dir: val('#tpdir'), who: val('#tpwho'), steps: val('#tpsteps') }); };
       ok.onclick = fire;
       const load = async () => {
         mapId = Number(sel.value);
@@ -277,6 +292,19 @@ async function transferDialog(defaultMapId) {
       sel.onchange = load;
       load();
     }).then(v => v || null);
+}
+const transferLine = t => '#传送 ' + (t.who ? t.who + ' ' : '') + t.name + ' ' + t.x + ' ' + t.y + (t.dir ? ' 朝' + t.dir : '') + (t.steps ? ' ' + t.steps.replace(/\s+/g, ' ') : '');
+
+// 场景里换谁来演（#扮演）：主角（换回来）/ 数据库里的角色 / 不是角色的人（要写行走图）
+async function asDialog() {
+  const actors = await lookup('actor').then(rows => rows.map(a => String(a.name || '').trim()).filter(Boolean)).catch(() => []);
+  const BACK = '主角（换回来）', OTHER = '不是角色的人…';
+  const pick = await chooseDialog('扮演：场景里主角的小人换成谁（场景播完自动换回）', [BACK, ...actors, OTHER]);
+  if (!pick) return null;
+  if (pick === BACK) return '#扮演 主角';
+  if (pick !== OTHER) return '#扮演 ' + pick;
+  const v = await promptDialog('扮演不是角色的人', '名字 行走图名 编号（比如：路人 People1 3）', '');
+  return v ? '#扮演 ' + v.trim().replace(/\s+/g, ' ') : null;
 }
 
 // 谁：主角 / 本事件 /（飘字还有画面）/ 人物 / 手动输入

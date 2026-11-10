@@ -193,16 +193,17 @@ module.exports = function (ctx) {
         const v = T.validator.newProblems(list, merged.list);
         return { ok: true, unchanged: merged.unchanged, outline: T.describer.outline(merged.list), problems: v.fresh, warnings: v.warnings.map(w => w.msg) };
       },
-    // 选项条件（WD_ConditionalChoice 这类）：<<[条件]>> 不满足时锁住、(([条件])) 不满足时不显示
-    //   改写这一条「选了…」，同时改「显示选项」里对应的那一项（游戏里显示的是那一份）
+    // 选项条件：{ at, line, lockNeed, hideNeed } = 要满足什么才能选 / 才显示（空 = 不设）
+    //   存成选项文字里的标记（取反：<<[…]>> 是「什么时候锁住」），改这一条「选了…」和「显示选项」里对应的那一项（游戏里显示的是那一份）
     'choice/cond'(T, b) {
       const at = target(b);
       const line = int(b.line, '第几条不对');
-      // 条件里不能有空格（插件按原文解析），也不能把包装的括号写坏
-      const clean = s => String(s == null ? '' : s).replace(/\s+/g, '').trim();
-      const disable = clean(b.disable);
-      const hide = clean(b.hide);
-      need(disable.length < 200 && hide.length < 200, '条件太长了');
+      const clean = s => String(s == null ? '' : s).replace(/\s+/g, '');   // 插件按原文解析，不能有空格
+      const lockNeed = clean(b.lockNeed), hideNeed = clean(b.hideNeed);
+      need(lockNeed.length < 200 && hideNeed.length < 200, '条件太长了');
+      for (const c of [lockNeed, hideNeed]) { const bad = choicecond.check(c); need(!bad, bad); }
+      const disable = lockNeed ? choicecond.negate(lockNeed) : '';
+      const hide = hideNeed ? choicecond.negate(hideNeed) : '';
       T.store.edit([fileOf(at)], docs => {
         const { holder } = locate(docs, at);
         const list = holder.list || [];

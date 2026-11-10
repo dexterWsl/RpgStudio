@@ -5,6 +5,10 @@
 //   调用公共事件：往里展开（最多 3 层，同一个不重复展开）
 //   插件指令：立绘插件（VNPictureBusts）、视频层插件、文字窗口插件翻成 pic / swap / move / erase / textwin；别的插件是 plugin（只在分镜里提一句）
 // 图片带上 missing（游戏里找不到这张图），给预览标红
+const choicecond = require('./choicecond.js');
+const stage = require('./stage.js');
+const { isMarked } = require('./scenes.js');
+
 function createPlayer(project, describer) {
   const P = project;
   const codes = describer.codes || require('./textcodes.js').createTextCodes(project);
@@ -51,7 +55,10 @@ function createPlayer(project, describer) {
           break;
         }
         case 102: {
-          const options = (p[0] || []).map(o => String(o).replace(/^<<[^>]*>>/, ''));
+          // 选项条件：去掉标记，记下「要满足什么才能选 / 才显示」（预览里不知道游戏进度，都能点，只标出来）
+          const nm = (kind, id) => { try { return P.name(kind, id); } catch { return ''; } };
+          const options = (p[0] || []).map(o => codes.word(choicecond.split(o).text.trim()));
+          const conds = (p[0] || []).map(o => { const n = choicecond.needs(o, nm); return n.lock || n.hide ? n : null; });
           const branches = options.map(() => []);
           let cancel = null;
           let j = i + 1;
@@ -69,7 +76,7 @@ function createPlayer(project, describer) {
             }
             j++;
           }
-          out.push({ t: 'choice', options, branches, cancel });
+          out.push({ t: 'choice', options, branches, cancel, ...(conds.some(Boolean) ? { conds } : {}) });
           i = j;
           break;
         }
@@ -109,7 +116,9 @@ function createPlayer(project, describer) {
           if (inner.length) out.push({ t: 'call', id: p[0], name: String(ce.name || ''), steps: inner });
           break;
         }
-        case 357: out.push(...pluginSteps(p)); break;
+        // 编辑器自己的演出插件（飘字、动作、扮演、带人的传送）：提一句；别的插件看认不认识
+        case 356: if (stage.isStageCmd(c)) out.push({ t: 'note', text: describer.describe(c) }); break;
+        case 357: if (stage.isStageCmd(c)) out.push({ t: 'note', text: describer.describe(c) }); else out.push(...pluginSteps(p)); break;
         case 125: case 126: case 127: case 128: { const g = codes.gainOf(c); if (g) ctx.gain = g; break; }
         default: break;
       }
@@ -207,7 +216,11 @@ function createPlayer(project, describer) {
   function timeline(list, o = {}) {
     list = list || [];
     const ctx = { depth: 0, seen: new Set(o.self ? [o.self] : []) };
-    return { screen: screen(), bust: bustSetup() || DEFAULT_BUST, steps: walk(list, 0, list.length, ctx) };
+    const steps = walk(list, 0, list.length, ctx);
+    // 场景里传送过、扮演过别人：游戏里播完会自动换回主角，这里也提一句
+    if (isMarked(list) && list.some(c => c && (c.code === 201 || (stage.parseCmd(c) && ['as', 'transfer'].includes(stage.parseCmd(c).cmd)))))
+      steps.push({ t: 'note', text: '场景播完：主角回到进场景前的地方，换回原来的样子' });
+    return { screen: screen(), bust: bustSetup() || DEFAULT_BUST, steps };
   }
   return { timeline, screen };
 }

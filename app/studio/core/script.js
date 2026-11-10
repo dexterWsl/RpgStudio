@@ -10,7 +10,9 @@
 //   #开关 名字或编号 开/关
 //   #变量 名字或编号 = + - * / % 数字
 //   #物品 名字或编号 +1 / -1
-//   #传送 地图名或编号 x y
+//   #传送 地图名或编号 x y [朝上|朝下|朝左|朝右] [到了以后的步骤…]
+//                           场景里还能写谁：#传送 圣佳 学校 10 5 前进3 = 换成圣佳演、传送过去、往前走 3 格；
+//                           场景里传送过、扮演过别人，场景播完主角自动回到原来的地方、换回原来的样子；场景外的传送就是主角传送
 //   #选项 去 | 不去         下面用 #1 #2 写各自的内容
 //   演出：
 //   #淡出 / #淡入            画面变黑 / 恢复
@@ -31,8 +33,9 @@
 //   #回到标题                结局放完回到标题画面
 //   人物和镜头：
 //   #飘字 [谁：]文字         字从人物头上一句一句飘起来再淡掉（不挡剧情）；谁 = 主角 / 本事件 / 画面 / 事件名字，不写 = 主角
-//   #动作 谁 步骤… [不等]    按名字让人物动：上 下 左 右（上3）、转身、面向主角、背对主角、跳、后退、等0.5、气泡 ！ ？…
-//                            （这两种是演出插件 RpgStudio_Stage 的插件指令，第一次用时编辑器自动把插件装进游戏）
+//   #动作 谁 步骤… [不等]    按名字让人物动：上 下 左 右（上3）、前进3、转身、面向主角、背对主角、跳、后退、等0.5、气泡 ！ ？…
+//   #扮演 谁 [行走图 编号]   只在场景里：主角的小人换成这个人（角色名 = 用这个角色的行走图；#扮演 主角 = 换回来）
+//                            （#飘字 #动作 #扮演、带人的 #传送 是演出插件 RpgStudio_Stage 的插件指令，第一次用时编辑器自动把插件装进游戏）
 //   #镜头 方向 格数 [速度]   镜头平移（上下左右，速度 1~6，默认 3），移完再往下
 //   #天气 雨|暴雨|雪|无 [强度] [秒]
 //   #闪光 [白|红] [秒]
@@ -55,16 +58,25 @@ const sameTone = (a, b) => (a || []).length === 4 && a.every((v, i) => Number(v)
 const textWidth = t => [...String(t)].reduce((n, ch) => n + (/[\u0000-\u00ff]/.test(ch) ? 0.5 : 1), 0);
 const centerPad = t => '　'.repeat(Math.max(0, Math.floor((30 - textWidth(t)) / 2)));
 const tintName = tone => Object.keys(TINTS).find(k => sameTone(tone, TINTS[k])) || '';
-const DIRS = { 下: 2, 左: 4, 右: 6, 上: 8 };
-const DIR_TEXT = { 2: '下', 4: '左', 6: '右', 8: '上' };
+const { DIRS, DIR_TEXT } = stage;
 const WEATHERS = { 无: 'none', 晴: 'none', 雨: 'rain', 暴雨: 'storm', 雪: 'snow' };
 const WEATHER_TEXT = { none: '无', rain: '雨', storm: '暴雨', snow: '雪' };
 const FLASHES = { 白: [255, 255, 255, 170], 红: [255, 60, 60, 170] };
 const flashName = c => Object.keys(FLASHES).find(k => sameTone(c, FLASHES[k])) || '';
-// 演出插件指令的参数（RPG Maker MZ 编辑器里显示成「谁 = 林屿」这样的续行）
-const STAGE_ARGS = { float: [['who', '谁'], ['text', '文字']], act: [['who', '谁'], ['steps', '步骤'], ['wait', '等做完']] };
-const STAGE_TEXT = { float: '飘字', act: '动作' };
+// 步骤：「前进 3」「上 2」这种中间多打了空格的，并成「前进3」
+const STEP_WORDS = new Set(['上', '下', '左', '右', '前进', '后退']);
+function stepTokens(toks) {
+  const out = [];
+  for (const t of toks) {
+    if (/^\d{1,2}$/.test(t) && out.length && STEP_WORDS.has(out[out.length - 1])) out[out.length - 1] += t;
+    else out.push(t);
+  }
+  return out;
+}
+const DIR_RE = /^面?朝(上|下|左|右)$/;
 const secText = f => String(Math.round(Number(f) / 60 * 100) / 100);
+
+const STEP_HELP = '能写：上 下 左 右 前进 后退（可带步数：上3、前进3）、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、穿透、不穿透，气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz';
 
 function createScript(project, opts = {}) {
   const P = project;
@@ -108,6 +120,27 @@ function createScript(project, opts = {}) {
     return first && first.id === Number(id) ? nm : String(id);
   }
   const exists = (kind, id) => P.has(kind, id);
+  // 扮演 / 传送里的「谁」：数据库里名字完全一样的角色（游戏里按名字找行走图）
+  const actorByName = who => (P.read('Actors.json') || []).find(a => a && String(a.name || '').trim() === String(who || '').trim()) || null;
+  const isProtagonist = who => ['主角', '玩家'].includes(String(who || '').trim());
+
+  // 「[谁] 地图 x y [朝向] [步骤…]」：最右边那一对整数是 x y（地图名里可以有数字和空格）；
+  // 前面整串是地图名，认不出来再试「第一个词是谁、后面是地图名」
+  function parseTransfer(rest) {
+    const toks = stepTokens(String(rest).trim().split(/\s+/).filter(Boolean));
+    let i = -1;
+    for (let k = toks.length - 2; k >= 1; k--) {
+      if (/^\d+$/.test(toks[k]) && /^\d+$/.test(toks[k + 1]) && toks.slice(k + 2).every(t => !/^\d+$/.test(t))) { i = k; break; }
+    }
+    if (i < 0) return null;
+    const pre = toks.slice(0, i), post = toks.slice(i + 2);
+    let dir = 0;
+    const d = post.length ? DIR_RE.exec(post[0]) : null;
+    if (d) { dir = DIRS[d[1]]; post.shift(); }
+    let who = '', map = resolveRef(pre.join(' '), 'map');
+    if (!map && pre.length >= 2) { who = pre[0]; map = resolveRef(pre.slice(1).join(' '), 'map'); }
+    return { type: 'transfer', who, map, x: Number(toks[i]), y: Number(toks[i + 1]), dir, steps: post.join(' '), bad: post.filter(t => !stage.validStep(t)) };
+  }
 
   function parseScript(text) {
     const items = [];
@@ -138,8 +171,10 @@ function createScript(project, opts = {}) {
       }
       const itm = /^[#＃]\s*物品\s*(.+?)\s*([+\-−])\s*(\d+)$/.exec(line);
       if (itm) return { type: 'item', id: resolveRef(itm[1], 'item'), add: itm[2] === '+', count: Number(itm[3]) };
-      const tr = /^[#＃]\s*传送\s*(.+?)\s+(\d+)\s+(\d+)$/.exec(line);
-      if (tr) return { type: 'transfer', map: resolveRef(tr[1], 'map'), x: Number(tr[2]), y: Number(tr[3]) };
+      const tr = /^[#＃]\s*传送[\s:：]*(.+)$/.exec(line);
+      if (tr) { const it = parseTransfer(tr[1]); if (it) return it; }
+      const as = /^[#＃]\s*扮演[\s:：]+(\S+)(?:\s+(\S+?)(?:\s+(\d))?)?$/.exec(line);
+      if (as) return { type: 'as', who: as[1], sheet: as[2] || '', index: as[3] ? Number(as[3]) : 0 };
       const fd = /^[#＃]\s*(淡出|淡入)$/.exec(line);
       if (fd) return { type: 'fade', out: fd[1] === '淡出' };
       const au = /^[#＃]\s*(音乐|环境音|音效)[\s:：]+(.+?)(?:\s+(\d{1,3}))?$/.exec(line);
@@ -181,7 +216,7 @@ function createScript(project, opts = {}) {
       }
       const ac = /^[#＃]\s*动作[\s:：]+(\S+)(?:\s+(.+))?$/.exec(line);
       if (ac) {
-        const toks = String(ac[2] || '').trim().split(/\s+/).filter(Boolean);
+        const toks = stepTokens(String(ac[2] || '').trim().split(/\s+/).filter(Boolean));
         let wait = true;
         if (toks[toks.length - 1] === '不等') { wait = false; toks.pop(); }
         return { type: 'act', who: ac[1], steps: toks.join(' '), wait, bad: toks.filter(t => !stage.validStep(t)) };
@@ -255,8 +290,8 @@ function createScript(project, opts = {}) {
         out.push({ code: 122, indent: 0, parameters: [it.id, it.id, Number(it.op) || 0, 0, Number(it.value) || 0] });
       } else if (it.type === 'item') {
         out.push({ code: 126, indent: 0, parameters: [it.id, it.add ? 0 : 1, 0, Math.max(1, Number(it.count) || 1)] });
-      } else if (it.type === 'transfer') {
-        out.push({ code: 201, indent: 0, parameters: [0, it.map, it.x, it.y, 0, 0] });
+      } else if (it.type === 'transfer' && !it.who && !it.steps) {
+        out.push({ code: 201, indent: 0, parameters: [0, it.map, it.x, it.y, it.dir || 0, 0] });
       } else if (it.type === 'pic') {
         const have = [...st.slots.entries()].find(([, v]) => v === it.name);
         if (have) { st.shows.push({ id: have[0], name: it.name }); continue; }
@@ -322,8 +357,20 @@ function createScript(project, opts = {}) {
       }
       case 'act': {
         if (!it.steps) throw new Error(`「#动作 ${it.who}」后面要写做什么（上 下 左 右、转身、跳、等0.5、！ …）`);
-        if (it.bad && it.bad.length) throw new Error(`「#动作」看不懂：${it.bad.join(' ')}（能写：上 下 左 右（上3）、前进、后退、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、穿透、不穿透，气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz；最后写「不等」= 不等他做完）`);
+        if (it.bad && it.bad.length) throw new Error(`「#动作」看不懂：${it.bad.join(' ')}（${STEP_HELP}；最后写「不等」= 不等他做完）`);
         return stageCommands('act', { who: it.who, steps: it.steps, wait: it.wait ? 'true' : 'false' });
+      }
+      case 'as': {
+        if (!isProtagonist(it.who) && !it.sheet && !actorByName(it.who)) throw new Error(`「#扮演 ${it.who}」：数据库里没有叫「${it.who}」的角色。不是角色的人要写行走图：#扮演 ${it.who} 行走图名 编号`);
+        if (it.sheet && !P.findImage('characters', it.sheet)) throw new Error(`「#扮演」：找不到行走图 img/characters/${it.sheet}`);
+        return stageCommands('as', { who: it.who, sheet: it.sheet, index: it.sheet ? it.index : '' });
+      }
+      case 'transfer': {
+        if (!it.who && !it.steps) return null;   // 普通的「场所移动」：在 scriptCommands 里
+        if (!it.map || !P.has('map', it.map)) throw new Error('找不到这张地图：' + JSON.stringify(it));
+        if (it.who && !isProtagonist(it.who) && !actorByName(it.who)) throw new Error(`「#传送 ${it.who} …」：数据库里没有叫「${it.who}」的角色。不是角色的人先写「#扮演 ${it.who} 行走图名 编号」，下一行再写「#传送 地图 x y」`);
+        if (it.bad && it.bad.length) throw new Error(`「#传送」后面的步骤看不懂：${it.bad.join(' ')}（${STEP_HELP}）`);
+        return stageCommands('transfer', { who: it.who, map: it.map, x: it.x, y: it.y, dir: it.dir || 0, steps: it.steps });
       }
       case 'selfsw': return [{ code: 123, indent: 0, parameters: [it.ch, it.on ? 0 : 1] }];
       case 'caption': {
@@ -334,29 +381,28 @@ function createScript(project, opts = {}) {
     }
     return null;
   }
-  // 演出插件指令：MZ 是「插件指令」+ 每个参数一行续行（跟 RPG Maker MZ 编辑器写出来的一样）；MV 是一行字
-  function stageCommands(cmd, args) {
-    if (!mz) return [{ code: 356, indent: 0, parameters: [stage.PLUGIN + ' ' + cmd + ' ' + JSON.stringify(args)] }];
-    return [
-      { code: 357, indent: 0, parameters: [stage.PLUGIN, cmd, STAGE_TEXT[cmd], { ...args }] },
-      ...STAGE_ARGS[cmd].map(([k, label]) => ({ code: 657, indent: 0, parameters: [label + ' = ' + (args[k] ?? '')] })),
-    ];
-  }
+  // 演出插件指令（参数表在 core/stage.js）
+  const stageCommands = (cmd, args) => stage.commands(cmd, args, mz);
   // 插件指令 → 写法（只看第一条；续行由调用方核对）
   function stageLine(c) {
-    let cmd = '', a = null;
-    if (c.code === 357 && c.parameters[0] === stage.PLUGIN) { cmd = c.parameters[1]; a = c.parameters[3] || {}; }
-    else if (c.code === 356) {
-      const m = new RegExp('^' + stage.PLUGIN + ' (float|act) (\\{.*\\})$').exec(String(c.parameters[0] || ''));
-      if (m) { cmd = m[1]; try { a = JSON.parse(m[2]); } catch { a = null; } }
+    const pc = stage.parseCmd(c);
+    if (!pc) return '';
+    const a = pc.args;
+    const str = k => String(a[k] == null ? '' : a[k]);
+    switch (pc.cmd) {
+      case 'float': {
+        const who = str('who'), text = str('text');
+        if (!text || /[\r\n]/.test(text)) return '';
+        return '#飘字 ' + (who ? who + '：' : '') + text;
+      }
+      case 'act': return '#动作 ' + str('who') + ' ' + str('steps') + (str('wait') === 'false' ? ' 不等' : '');
+      case 'as': return '#扮演 ' + str('who') + (str('sheet') ? ' ' + str('sheet') + (Number(a.index) ? ' ' + Number(a.index) : '') : '');
+      case 'transfer': {
+        const id = Number(a.map), dir = Number(a.dir) || 0;
+        if (!id || !P.has('map', id)) return '';
+        return '#传送 ' + (str('who') ? str('who') + ' ' : '') + refText('map', id) + ' ' + Number(a.x) + ' ' + Number(a.y) + (DIR_TEXT[dir] ? ' 朝' + DIR_TEXT[dir] : '') + (str('steps') ? ' ' + str('steps') : '');
+      }
     }
-    if (!a || typeof a !== 'object') return '';
-    if (cmd === 'float') {
-      const who = String(a.who || ''), text = String(a.text || '');
-      if (!text || /[\r\n]/.test(text)) return '';
-      return '#飘字 ' + (who ? who + '：' : '') + text;
-    }
-    if (cmd === 'act') return '#动作 ' + String(a.who || '') + ' ' + String(a.steps || '') + (String(a.wait) === 'false' ? ' 不等' : '');
     return '';
   }
   // 立绘：这个人已经在屏幕上 → 原位置换表情（写了位置就挪过去）；不在 → 按位置放（没写位置：第一个人左、第二个人右、再来放中间）

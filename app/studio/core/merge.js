@@ -35,6 +35,7 @@
 const EDITABLE = new Set([101, 401, 231, 235, 230, 121, 122, 126, 201, 221, 222, 223, 225, 241, 242, 245, 246, 250, 213, 117, 211, 322, 214, 123, 354, 204, 224, 236]);
 // 演出插件（#飘字 #动作）的插件指令，连同后面「谁 = …」那几行续行，也能放进编辑框
 const { isStageCmd } = require('./stage.js');
+const { isMarked: isSceneList } = require('./scenes.js');
 const stageAt = (list, i) => {
   const c = list[i];
   if (isStageCmd(c)) return true;
@@ -43,6 +44,8 @@ const stageAt = (list, i) => {
   while (k >= 0 && list[k].code === 657) k--;
   return k >= 0 && list[k].code === 357 && isStageCmd(list[k]);
 };
+const { DIR_TEXT } = require('./stage.js');
+const choicecond = require('./choicecond.js');
 const isBust = name => /^立绘\//.test(String(name || ''));
 const OPS = ['=', '+', '-', '*', '/', '%'];
 const KEEP = '#原样 ';
@@ -55,8 +58,10 @@ const CONT = new Set([405, 408, 505, 605, 655, 657]);
 // 选项的每一个分支：「■ 选了「选项的字」」，字可以改；照着写一行 = 加一个选项，删掉 = 删掉这个选项
 const choiceLine = label => ANCHOR + ' 选了「' + String(label ?? '') + '」';
 // 「■ 选项（3 个）：A / B / C」：只是列出有哪些选项，方便一眼看全（改字在下面的「■ 选了」行）
+//   带条件的选项（<<[…]>> / (([…]))）这里只写字，后面标一个〔有条件〕；条件本身在「■ 选了」行里
 const choiceHead = labels => {
-  const s = (labels || []).map(l => (String(l ?? '').trim() ? String(l) : '（空）')).join(' / ').replace(/\s*[\r\n]+\s*/g, ' ');
+  const show = l => { const c = choicecond.split(l); const t = c.text.trim(); return (t || '（空）') + (c.disable || c.hide ? '〔有条件〕' : ''); };
+  const s = (labels || []).map(show).join(' / ').replace(/\s*[\r\n]+\s*/g, ' ');
   return ANCHOR + ` 选项（${(labels || []).length} 个）：` + (s.length > 160 ? s.slice(0, 160) + '…' : s);
 };
 const HEAD_RE = /^■ 选项(?:$|（|：)/;
@@ -201,7 +206,7 @@ function createMerger(ctx) {
       case 121: if (p[0] === p[1]) for (const r of ref('switch', p[0])) cands.push('#开关 ' + r + ' ' + (p[2] === 0 ? '开' : '关')); break;
       case 122: if (p[0] === p[1] && p[3] === 0 && OPS[p[2]]) for (const r of ref('var', p[0])) cands.push('#变量 ' + r + ' ' + OPS[p[2]] + ' ' + p[4]); break;
       case 126: if (p[2] === 0 && Number(p[3]) >= 1) for (const r of ref('item', p[0])) cands.push('#物品 ' + r + ' ' + (p[1] === 0 ? '+' : '-') + p[3]); break;
-      case 201: if (p[0] === 0) for (const r of ref('map', p[1])) cands.push('#传送 ' + r + ' ' + p[2] + ' ' + p[3]); break;
+      case 201: if (p[0] === 0) for (const r of ref('map', p[1])) cands.push('#传送 ' + r + ' ' + p[2] + ' ' + p[3] + (DIR_TEXT[p[4]] ? ' 朝' + DIR_TEXT[p[4]] : '')); break;
     }
     for (const line of cands) {
       let it;
@@ -219,7 +224,7 @@ function createMerger(ctx) {
       case 121: return it.type === 'switch' && it.id === p[0] && it.on === (p[2] === 0);
       case 122: return it.type === 'var' && it.id === p[0] && it.op === p[2] && it.value === p[4];
       case 126: return it.type === 'item' && it.id === p[0] && it.add === (p[1] === 0) && it.count === p[3];
-      case 201: return it.type === 'transfer' && it.map === p[1] && it.x === p[2] && it.y === p[3];
+      case 201: return it.type === 'transfer' && !it.who && !it.steps && it.map === p[1] && it.x === p[2] && it.y === p[3] && (it.dir || 0) === (p[4] || 0);
     }
     return false;
   }
@@ -439,7 +444,7 @@ function createMerger(ctx) {
       // # 标记
       if (seg.text.startsWith(KEEP.trim())) throw new Error('「#原样」行只能删除或挪位置，不能改内容：' + seg.text);
       const it = seg.item || (ctx.parseScript(seg.text) || [])[0];
-      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作，立绘 #立绘 #退场，#场景，#插件 插件名 指令名（参数…））');
+      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景，#插件 插件名 指令名（参数…））');
       if (it.type === 'bust' || it.type === 'unbust') {
         if (it.type === 'bust' && !ctx.picExists(it.who ? '立绘/' + it.who + '_' + it.face : '')) throw new Error('立绘不存在：img/pictures/立绘/' + it.who + '_' + it.face + '（先把图放进去，或者用「导入素材」）');
         emit((it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st)).map(at));
@@ -449,6 +454,16 @@ function createMerger(ctx) {
         const cmds = ctx.stagingCommand(it);
         if (tpl && tpl.head) cmds[0].parameters = [...tpl.head.parameters];
         emit(cmds.map(at));
+        continue;
+      }
+      if (it.type === 'as' || it.type === 'transfer') {
+        // 场景里才能换人演（场景播完自动换回主角）；场景外的传送就是主角传送
+        if (!opts.scene && (it.type === 'as' || it.who)) throw new Error(it.type === 'as' ? `「${seg.text}」：#扮演 只能写在场景里（场景播完自动换回主角）` : `「${seg.text}」：场景外的 #传送 就是主角传送，不能选人（要换人演，写在场景里）`);
+        if (it.type === 'transfer' && !ctx.exists('map', it.map)) throw new Error('找不到这张地图：' + seg.text);
+        const cmds = (it.type === 'as' || it.who || it.steps ? ctx.stagingCommand(it) : ctx.scriptCommands([it])).map(at);
+        // 改的是原来那一行「场所移动」：淡入淡出的方式沿用原来的
+        if (cmds[0].code === 201 && tpl && tpl.raw[0] && tpl.raw[0].code === 201) cmds[0].parameters[5] = tpl.raw[0].parameters[5] || 0;
+        emit(cmds);
         continue;
       }
       if (STAGING.has(it.type)) {
@@ -490,12 +505,9 @@ function createMerger(ctx) {
       } else if (it.type === 'wait') {
         emit([{ code: 230, indent: ind, parameters: [Math.max(1, Math.round(it.sec * 60))] }]);
       } else {
-        const kind = { switch: 'switch', var: 'var', item: 'item', transfer: 'map' }[it.type];
-        const id = it.type === 'transfer' ? it.map : it.id;
-        if (!kind || !ctx.exists(kind, id)) throw new Error('找不到这个名字：' + seg.text);
-        const cmds = ctx.scriptCommands([it]).map(at);
-        if (it.type === 'transfer' && tpl) { cmds[0].parameters[4] = tpl.raw[0].parameters[4] || 0; cmds[0].parameters[5] = tpl.raw[0].parameters[5] || 0; }
-        emit(cmds);
+        const kind = { switch: 'switch', var: 'var', item: 'item' }[it.type];
+        if (!kind || !ctx.exists(kind, it.id)) throw new Error('找不到这个名字：' + seg.text);
+        emit(ctx.scriptCommands([it]).map(at));
       }
     }
 
@@ -584,6 +596,7 @@ function createMerger(ctx) {
   //   同一个选项的分支按字对齐（最长公共子序列），对不上的按位置配对（= 改了字，里面的 ■ 行要对得上），
   //   多出来的是新选项，少了的是删掉的选项（连同里面所有指令）。选项变了就重写选项列表、分支编号，取消 / 默认选项跟着挪。
   function mergeList(list, text, opts = {}) {
+    const scene = opts.scene != null ? !!opts.scene : isSceneList(list);   // 场景（公共事件带场景标记）里才能 #扮演、#传送 选人
     list = list || [];
     const al = opts.analysis || analyzeList(list, opts);
     const nameMap = tokensOf(list.filter(c => c.code === 401).map(c => c.parameters[0]));
@@ -790,10 +803,10 @@ function createMerger(ctx) {
     const emitPart = k => {
       const t = parts[k].join('\n'), r = runOf[k];
       const pic = al.single ? undefined : picState(out);
-      if (r) out.push(...merge(list.slice(r.run.start, r.run.end + 1), t, { analysis: r.an, indent: r.run.indent, pic, nameMap }).list);
+      if (r) out.push(...merge(list.slice(r.run.start, r.run.end + 1), t, { analysis: r.an, indent: r.run.indent, pic, nameMap, scene }).list);
       else if (t.trim()) {
         if (afterHead) throw new Error('「■ 选项」下面不能直接写内容，要写在某个「■ 选了「…」」下面');
-        out.push(...merge([], t, { indent: ctxInd, pic, nameMap }).list);
+        out.push(...merge([], t, { indent: ctxInd, pic, nameMap, scene }).list);
       }
     };
     emitPart(0);

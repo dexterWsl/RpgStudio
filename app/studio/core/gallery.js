@@ -13,7 +13,7 @@
 const ROOM_TAG = '<RpgStudioRecallRoom>';
 const GALLERY_NAME = /回想|图鉴|圖鑑|画廊|鑑賞|鉴赏|gallery|recollection|memories|memory ?room|replay ?room/i;
 const CANCEL = /^(算了|取消|退出|返回|关闭|不看了|没事|不要|下次再说|nevermind|never mind|cancel|no|back|exit|quit|return|leave)[。.!！]?$/i;
-const CHOICE_COND = /^\s*<<(.*?)>>/;
+const choicecond = require('./choicecond.js');
 // 复制到回想房时去掉的：传送、打开存档 / 游戏结束 / 回标题、暂时消除事件（会把入口消掉）
 const DROP = new Set([201, 352, 353, 354, 214]);
 // 指向某个事件的指令：原地图上的第 N 号事件在回想房里不存在（或者是别的东西），这几条去掉；玩家（-1）和「本事件」（0）留着
@@ -43,14 +43,12 @@ const parseTag = note => {
 const makeTag = (at, ce, copy, pic, deps = []) => `<RpgStudioRecall:src=${at.type === 'map' ? `map/${at.map}/${at.ev}/${at.page}` : `ce/${at.ce}`};ce=${ce};copy=${copy ? 1 : 0}${pic ? ';pic=' + pic : ''}${deps.length ? ';deps=' + deps.join(',') : ''}>`;
 const clone = o => JSON.parse(JSON.stringify(o));
 
-// 选项文字：去掉 <<条件>>，拿出要求的开关（!s[N] = 开关 N 要是开的）
+// 选项文字：去掉条件标记，拿出要求的开关（<<[!s[N]]>> = 开关 N 不开就灰掉 = 要开关 N 是开的）
 function choiceInfo(text) {
-  const raw = String(text == null ? '' : text);
-  const m = CHOICE_COND.exec(raw);
-  const label = (m ? raw.slice(m[0].length) : raw).trim();
+  const cc = choicecond.split(text);
   const needs = [];
-  if (m) for (const x of m[1].matchAll(/(!?)\s*s\[(\d+)\]/g)) needs.push({ id: Number(x[2]), on: x[1] === '!' });
-  return { label, needs, cond: m ? m[0].trim() : '' };
+  for (const t of choicecond.terms(cc.disable)) { const m = /^(!?)s\[(\d+)\]$/.exec(t); if (m) needs.push({ id: Number(m[2]), on: m[1] === '!' }); }
+  return { label: cc.text.trim(), needs, cond: cc.disable ? '<<[' + cc.disable + ']>>' : '' };
 }
 
 function createGallery(project, xref, opts = {}) {

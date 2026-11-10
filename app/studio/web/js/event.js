@@ -166,7 +166,7 @@ function cueRow(r) {
   const link = r.code === 402 && CUE_AT ? `<button type="button" class="sclink" data-sline="${r.i}" data-slabel="${esc(r.label || '')}" data-sat="${atJS}" title="选这个选项时播一个场景">关联场景</button>` : '';
   // 选项条件（<<[..]>> 锁住 / (([..])) 不显示）：有就显示成人话，没有就一个「＋条件」
   const cnd = r.code === 402 && CUE_AT
-    ? `<button type="button" class="cndbtn${r.condText ? ' on' : ''}" data-cline="${r.i}" data-clabel="${esc(String(r.label || '').trim())}" data-ccond="${esc(JSON.stringify(r.cond || {}))}" data-cat="${atJS}" title="${esc(r.condText ? '选项条件：' + r.condText : '给这个选项加条件：不满足时锁住（灰掉）或不显示')}">${r.condText ? '条件' : '＋条件'}</button>${r.condText ? `<span class="cndtxt">${esc(r.condText)}</span>` : ''}`
+    ? `<button type="button" class="cndbtn${r.condText ? ' on' : ''}" data-cline="${r.i}" data-clabel="${esc(String(r.label || '').trim())}" data-ccond="${esc(JSON.stringify(r.cond || {}))}" data-cat="${atJS}" title="${esc(r.condText ? '选项条件：' + r.condText : '给这个选项加条件：满足才能选（不然是灰的），或者满足才显示')}">${r.condText ? '条件' : '＋条件'}</button>${r.condText ? `<span class="cndtxt">${esc(r.condText)}</span>` : ''}`
     : '';
   return `<div class="row${br}" data-ind="${r.indent}" style="${d}"><span class="rails"></span><div class="body">${br ? '<span class="brchev" aria-hidden="true"></span>' : ''}${body}${link}${cnd}${br ? '<span class="brn"></span>' : ''}</div><span class="lnum num">${r.i + 1}</span></div>`;
 }
@@ -262,6 +262,7 @@ function editBox(box, pg, at) {
     return;
   }
   const P = S.project;
+  const inScene = !!pg.isScene;   // 场景（公共事件带场景标记）：能 #扮演、#传送 选人，播完自动换回主角
   const clearHint = P.pictures.clearAll === 'script' ? `关闭全部剧情图片（${P.pictures.min}~${P.pictures.max} 号）` : '关闭这一页里还在显示的图';
   box.innerHTML = `
     <div class="editor"><pre aria-hidden="true"></pre><textarea spellcheck="false" aria-label="台词"></textarea></div>
@@ -275,6 +276,7 @@ function editBox(box, pg, at) {
       <button class="small" id="insItem">插入物品</button>
       <button class="small" id="insVar">插入变量</button>
       <button class="small" id="insTp">插入传送</button>
+      ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">插扮演</button>' : ''}
       <button class="small" id="insFloat">插飘字</button>
       <button class="small" id="insAct">插动作</button>
     </div>
@@ -289,7 +291,10 @@ function editBox(box, pg, at) {
       <tr><td>#开关 名字 开</td><td>也可以写编号；关 = 关闭</td></tr>
       <tr><td>#变量 名字 + 1</td><td>支持 = + - * / %</td></tr>
       <tr><td>#物品 名字 +1</td><td>获得 / 失去物品</td></tr>
-      <tr><td>#传送 地图名 x y</td><td>传送到某张地图</td></tr>
+      <tr><td>#传送 地图名 x y</td><td>${inScene
+        ? '场景里的传送：<span class="t-code">#传送 圣佳 医务室 10 5 前进3</span> = 换成圣佳来演、传送过去、到了往前走 3 格（谁、朝向「朝上」、到了以后的步骤都可以不写）。场景播完主角自动回到进场景前的地方、换回原来的样子'
+        : '主角传送到某张地图；后面可以写「朝上」和到了以后的步骤（<span class="t-code">#传送 一楼 10 5 朝上 前进3</span>）。场景外的传送就是主角自己，换人演要写在场景里'}</td></tr>
+      ${inScene ? '<tr><td>#扮演 圣佳</td><td>场景里主角的小人换成圣佳（数据库里的角色）；不是角色的人写行走图：<span class="t-code">#扮演 路人 People1 3</span>；<span class="t-code">#扮演 主角</span> = 换回来。场景播完自动换回</td></tr>' : ''}
       <tr><td>#选项 去 | 不去</td><td>下面用「#1 …」「#2 …」写各自的内容</td></tr>
       <tr><td>#字幕 大一 · 九月</td><td>画面中间一条暗底的字（章节、时间、地点）；几行用 ｜ 隔开</td></tr>
       <tr><td>#立绘 林屿 笑 左</td><td>显示立绘 img/pictures/立绘/林屿_笑，底边贴着画面下沿；位置 左 / 中 / 右 可以不写（先左后右）；同一个人再写一次 = 换表情</td></tr>
@@ -305,11 +310,11 @@ function editBox(box, pg, at) {
       <tr><td>#回到标题</td><td>结局放完回到标题画面</td></tr>
       <tr><td>#震动 / #气泡 ！</td><td>画面震一下（可写强度 1~9）；主角头上冒气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz（后面写「本事件」= 这个事件头上）</td></tr>
       <tr><td>#飘字 林屿：真的是我的问题吗</td><td>字从这个人头上飘起来再淡掉，不挡剧情（连着写几句，前面的会被顶上去，像念头一个一个冒出来）；不写名字 = 主角；「画面：」= 画面中间随便一处。名字可以是主角、本事件、地图上事件的名字</td></tr>
-      <tr><td>#动作 赵磊 转身 ！ 下2 等0.5</td><td>让人物动：上 下 左 右（上3）、前进、后退、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、气泡 ！ ？ …；最后写「不等」= 不等他做完（两个人一起动）。走不过去的那步会跳过。<br>移动路线就是写这个：<span class="t-code">#动作 本事件 下3 左2</span> = 这个事件往下走三格、再往左走两格（走完才往下；加「不等」就不等）</td></tr>
+      <tr><td>#动作 赵磊 转身 ！ 下2 等0.5</td><td>让人物动：上 下 左 右（上3）、前进 后退（前进3）、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、气泡 ！ ？ …；最后写「不等」= 不等他做完（两个人一起动）。走不过去的那步会跳过。<br>移动路线就是写这个：<span class="t-code">#动作 本事件 下3 左2</span> = 这个事件往下走三格、再往左走两格（走完才往下；加「不等」就不等）</td></tr>
       <tr><td>#镜头 上 4 / #天气 雨 / #闪光</td><td>镜头往上平移 4 格（可写速度 1~6）；天气 雨 / 暴雨 / 雪 / 无（可写强度、秒）；画面闪一下（白 / 红）</td></tr>
       <tr><td>■ 选项（N 个）：…</td><td>列出这里有哪些选项，一眼看全；只是看的，不用改，改字在下面的「■ 选了」行</td></tr>
       <tr><td>■ 选了「…」</td><td>选项：改「」里的字 = 改这个选项；照着写一行 = 加一个选项（放在「■ 选项结束」或「■ 按取消时」前面，最多 6 个），下面写它的台词；删掉这一行和它下面的内容 = 删掉这个选项</td></tr>
-      <tr><td>选项条件</td><td>阅读视图里每个「选了 …」旁边的「条件」按钮：设成不满足时锁住 / 不显示。等价于在选项文字前面写 <span class="t-code">&lt;&lt;[v[110]&lt;11]&gt;&gt;</span> 或 <span class="t-code">(([s[12]]))</span>（WD_ConditionalChoice 这类插件）</td></tr>
+      <tr><td>选项条件</td><td>有的选项要满足条件才能选：在阅读视图里点「选了 …」旁边的「＋条件」，选「满足才能选（不然是灰的）」或「满足才显示」。存进选项文字里的是插件写法 <span class="t-code">&lt;&lt;[条件]&gt;&gt;</span>（条件成立时灰掉）/ <span class="t-code">(([条件]))</span>（条件成立时不显示），也可以直接在「■ 选了」行里改；游戏里没装 WD_ConditionalChoice 也能用（编辑器自带的演出插件会接手）</td></tr>
       <tr><td>■ …</td><td>其它原来的结构（条件、音效、脚本、选项的开头和结尾…），不能改、删、挪；在它们中间可以加台词</td></tr>
       <tr><td>■ 插件：…</td><td>插件指令。插件里写了参数表的会显示成上面那种 <span class="t-code">#插件</span> 行，可以改、可以挪；没写参数表的只能看（要动就去 RPG Maker 里改）</td></tr>
       <tr><td>#原样 …</td><td>编辑框表达不了的指令，可以删、可以挪，不能改内容</td></tr>
@@ -373,17 +378,17 @@ function editBox(box, pg, at) {
   $('#insSay', box).onclick = async () => { const n = await pickDialog('插入人物', 'lookup?kind=actor'); if (n) insert(n + '：'); };
   $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
   $('#insVar', box).onclick = async () => { const n = await pickDialog('插入变量', 'lookup?kind=var'); if (n) insert('#变量 ' + n + ' + 1'); };
-  $('#insTp', box).onclick = async () => { const t = await transferDialog(at && at.type === 'map' ? at.map : 0); if (t) insert('#传送 ' + t.name + ' ' + t.x + ' ' + t.y); };
+  $('#insTp', box).onclick = async () => { const t = await transferDialog(at && at.type === 'map' ? at.map : 0, { scene: inScene }); if (t) insert(transferLine(t)); };
+  if (inScene) $('#insAs', box).onclick = async () => { const l = await asDialog(); if (l) insert(l); };
   $('#insFloat', box).onclick = async () => { const who = await whoDialog('飘字：字从谁头上冒出来', ['画面']); if (who) insert('#飘字 ' + who + '：'); };
   $('#insAct', box).onclick = async () => { const who = await whoDialog('动作 / 移动路线：谁动'); if (who) insert('#动作 ' + who + ' '); };
 }
 
 
-// ---------- 选项条件（WD_ConditionalChoice 这类插件） ----------
-//   <<[条件]>>   不满足时锁住（选项还在，但是灰的、点不了）
-//   (([条件]))   不满足时直接不显示
-// 写法：s[3] 开关3为开 / !s[3] 为关 / v[65]<70 变量比较（右边也能写 v[4]、g）/ g 金币 /
-//       i[5] w[5] a[5] 物品武器护甲 / p[3] 角色在队伍；逗号 = 全部成立，分号 = 任意成立
+// ---------- 选项条件：要满足什么才能选 / 才显示 ----------
+//   这里填的是「要满足什么」；存的时候服务端取反写成插件的标记（<<[…]>> = 什么时候灰掉，(([…])) = 什么时候不显示）
+//   条件写法：s[3] 开关开 / !s[3] 开关关 / v[65]>=70 变量比较（右边也能写 v[4]、g 金币）/ i[5] 有物品 / p[3] 角色在队伍；
+//   几条之间是「并且」（逗号）；「任意一个」用分号
 function ccParse(cond) {
   const s = String(cond || '').trim();
   if (!s) return [];
@@ -391,133 +396,94 @@ function ccParse(cond) {
   return s.split(',').map(x => x.trim()).filter(Boolean).map(x => {
     let m;
     if ((m = /^(!?)s\[(\d+)\]$/.exec(x))) return { type: 'switch', id: Number(m[2]), off: !!m[1] };
-    if ((m = /^(!?)v\[(\d+)\]\s*(<=|>=|!=|=|<|>)\s*(.+)$/.exec(x))) return { type: 'var', id: Number(m[2]), neg: !!m[1], op: m[3], value: m[4] };
+    if ((m = /^v\[(\d+)\](<=|>=|!=|=|<|>)(-?\d+|v\[\d+\]|g)$/.exec(x))) return { type: 'var', id: Number(m[1]), op: m[2], value: m[3] };
+    if ((m = /^(!?)i\[(\d+)\]$/.exec(x))) return { type: 'item', id: Number(m[2]), off: !!m[1] };
     return { type: 'raw', text: x };
   });
 }
 function ccBuild(rows) {
   return rows.map(r => r.type === 'switch' ? (r.off ? '!' : '') + 's[' + r.id + ']'
-    : r.type === 'var' ? (r.neg ? '!' : '') + 'v[' + r.id + ']' + r.op + String(r.value == null ? '' : r.value).replace(/\s+/g, '')
-      : String(r.text || '').replace(/\s+/g, '')).filter(Boolean).join(',');
+    : r.type === 'var' ? 'v[' + r.id + ']' + r.op + String(r.value == null ? '' : r.value).replace(/\s+/g, '')
+      : r.type === 'item' ? (r.off ? '!' : '') + 'i[' + r.id + ']'
+        : String(r.text || '').replace(/\s+/g, '')).filter(Boolean).join(',');
 }
 const CC_CMP = { '<=': '≤', '>=': '≥', '!=': '≠' };
-function ccDescribeTerm(t, nameOf) {
-  let s = String(t || '').trim();
-  if (!s) return '';
-  let neg = false;
-  if (s[0] === '!') { neg = true; s = s.slice(1); }
-  const nm = (kind, id) => {
-    const n = nameOf(kind, id);
-    return ({ switch: '开关', var: '变量', item: '物品', weapon: '武器', armor: '护甲', actor: '角色' })[kind] + ' ' + id + (n ? '「' + n + '」' : '');
-  };
-  const side = v => {
-    const x = String(v || '').trim();
-    if (x === 'g') return '金币';
-    const m = /^!?v\[(\d+)\]$/.exec(x);
-    return m ? nm('var', Number(m[1])) : x;
-  };
-  let m;
-  if ((m = /^s\[(\d+)\]$/.exec(s))) return nm('switch', Number(m[1])) + (neg ? '为关' : '为开');
-  if ((m = /^p\[(\d+)\]$/.exec(s))) return nm('actor', Number(m[1])) + (neg ? '不在队伍' : '在队伍');
-  if ((m = /^([iwa])\[(\d+)\]$/.exec(s))) return (neg ? '没有' : '持有') + nm({ i: 'item', w: 'weapon', a: 'armor' }[m[1]], Number(m[2]));
-  if ((m = /^v\[(\d+)\]\s*(<=|>=|!=|=|<|>)\s*(.+)$/.exec(s))) return nm('var', Number(m[1])) + ' ' + (CC_CMP[m[2]] || m[2]) + ' ' + side(m[3]);
-  if ((m = /^g\s*(<=|>=|!=|=|<|>)\s*(.+)$/.exec(s))) return '金币 ' + (CC_CMP[m[1]] || m[1]) + ' ' + side(m[2]);
-  return (neg ? '不满足：' : '') + s;
-}
-function ccDescribe(cond, nameOf) {
-  const s = String(cond || '').trim();
-  if (!s) return '';
-  const or = s.includes(';');
-  return s.split(or ? ';' : ',').map(x => ccDescribeTerm(x, nameOf)).filter(Boolean).join(or ? ' 或者 ' : ' 并且 ');
-}
 
 async function choiceCondDialog(at, line, label, cond) {
-  const [sws, vrs] = await Promise.all([lookup('switch'), lookup('var')]);
-  const nameOf = (kind, id) => {
-    const rows = kind === 'switch' ? sws : kind === 'var' ? vrs : [];
-    const r = rows.find(x => Number(x.id) === Number(id));
-    return r && r.name ? r.name : '';
-  };
+  const [sws, vrs, its] = await Promise.all([lookup('switch'), lookup('var'), lookup('item')]);
   const cur = cond || {};
-  const keep = { disable: cur.disable || '', hide: cur.hide || '' };
-  let mode = cur.hide ? 'hide' : cur.disable ? 'lock' : 'none';
-  let rows = ccParse(mode === 'hide' ? keep.hide : mode === 'lock' ? keep.disable : '');
-  const opt = (rows2, id, labelOf) => (rows2 || []).map(x => `<option value="${x.id}" ${Number(id) === x.id ? 'selected' : ''}>${x.id} ${esc(x.name || '')}</option>`).join('');
+  // 两种条件可以同时有：这里一次改一种，另一种原样留着
+  let mode = cur.lockNeed ? 'lock' : cur.hideNeed ? 'hide' : 'lock';
+  const need = { lock: cur.lockNeed || '', hide: cur.hideNeed || '' };
+  let rows = ccParse(need[mode]);
+  const opt = (list, id) => (list || []).map(x => `<option value="${x.id}" ${Number(id) === x.id ? 'selected' : ''}>${x.id} ${esc(x.name || '')}</option>`).join('');
+  const del = '<button type="button" class="quiet small" data-del title="去掉这条">×</button>';
   const rowHtml = (r, i) => {
-    if (r.type === 'switch') return `<div class="ccrow" data-i="${i}"><span class="cct">开关</span>
-      <select data-f="id">${opt(sws, r.id)}</select>
-      <select data-f="on"><option value="1" ${r.off ? '' : 'selected'}>为开</option><option value="0" ${r.off ? 'selected' : ''}>为关</option></select>
-      <button type="button" class="quiet small" data-del title="去掉这条">×</button></div>`;
-    if (r.type === 'var') return `<div class="ccrow" data-i="${i}"><span class="cct">变量</span>
-      <select data-f="id">${opt(vrs, r.id)}</select>
-      <select data-f="op">${['<', '<=', '>', '>=', '=', '!='].map(o => `<option value="${o}" ${r.op === o ? 'selected' : ''}>${CC_CMP[o] || o}</option>`).join('')}</select>
-      <input data-f="value" value="${esc(r.value == null ? '' : r.value)}" placeholder="数字 / v[12] / g">
-      <button type="button" class="quiet small" data-del title="去掉这条">×</button></div>`;
-    return `<div class="ccrow" data-i="${i}"><span class="cct">自己写</span>
-      <input data-f="text" value="${esc(r.text || '')}" placeholder="比如 !s[12] 或 v[65]>=v[4]">
-      <button type="button" class="quiet small" data-del title="去掉这条">×</button></div>`;
+    if (r.type === 'switch') return `<div class="ccrow" data-i="${i}"><span class="cct">开关</span><select data-f="id">${opt(sws, r.id)}</select>
+      <select data-f="on"><option value="1" ${r.off ? '' : 'selected'}>是开的</option><option value="0" ${r.off ? 'selected' : ''}>是关的</option></select>${del}</div>`;
+    if (r.type === 'var') return `<div class="ccrow" data-i="${i}"><span class="cct">变量</span><select data-f="id">${opt(vrs, r.id)}</select>
+      <select data-f="op">${['>=', '>', '=', '!=', '<=', '<'].map(o => `<option value="${o}" ${r.op === o ? 'selected' : ''}>${CC_CMP[o] || o}</option>`).join('')}</select>
+      <input data-f="value" value="${esc(r.value == null ? '' : r.value)}" placeholder="数字 / v[12] / g">${del}</div>`;
+    if (r.type === 'item') return `<div class="ccrow" data-i="${i}"><span class="cct">物品</span><select data-f="id">${opt(its, r.id)}</select>
+      <select data-f="on"><option value="1" ${r.off ? '' : 'selected'}>有</option><option value="0" ${r.off ? 'selected' : ''}>没有</option></select>${del}</div>`;
+    return `<div class="ccrow" data-i="${i}"><span class="cct">自己写</span><input data-f="text" value="${esc(r.text || '')}" placeholder="比如 !s[12] 或 v[65]>=v[4]">${del}</div>`;
   };
   const r = await openDialog(`<header><h3>选项条件 — 「${esc(String(label || '').trim())}」</h3><button class="quiet small" data-x>关闭</button></header>
     <div class="dbody">
       <div class="seg" id="ccMode">
-        <button type="button" data-cm="none">不设条件</button>
-        <button type="button" data-cm="lock">不满足时锁住</button>
-        <button type="button" data-cm="hide">不满足时不显示</button>
+        <button type="button" data-cm="lock">满足才能选（不然是灰的）</button>
+        <button type="button" data-cm="hide">满足才显示</button>
       </div>
       <div class="ccrows" id="ccRows"></div>
       <div class="scchips sctools">
         <button type="button" class="small" data-add="switch">＋ 开关</button>
         <button type="button" class="small" data-add="var">＋ 变量</button>
+        <button type="button" class="small" data-add="item">＋ 物品</button>
         <button type="button" class="small" data-add="raw">＋ 自己写</button>
       </div>
       <div class="fnote" id="ccPrev"></div>
-      <div class="fnote">条件成立时才可选 / 才显示。几条之间是「并且」；要「任意一个成立」就用「自己写」并用分号隔开。</div>
       <div id="ccErr"></div>
     </div>
-    <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>确定</button></footer>`,
+    <footer><button type="button" class="quiet" data-clear>去掉这种条件</button><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>确定</button></footer>`,
     (d, done) => {
       const box = $('#ccRows', d), prev = $('#ccPrev', d);
       const sync = () => {
-        const built = ccBuild(rows);
-        if (mode === 'none') { prev.innerHTML = '不设条件：这个选项一直可选。'; return; }
-        prev.innerHTML = built
-          ? `${mode === 'hide' ? '不满足时不显示' : '不满足时锁住'}，条件是：<b>${esc(ccDescribe(built, nameOf) || built)}</b>`
-          : `<span class="dim">${mode === 'hide' ? '不显示' : '锁住'}：还没写条件</span>`;
+        need[mode] = ccBuild(rows);
+        const other = mode === 'lock' ? need.hide : need.lock;
+        prev.innerHTML = (rows.length ? `下面几条${rows.length > 1 ? '都' : ''}满足时，这个选项${mode === 'lock' ? '才能选；不满足时还在，但是灰的' : '才会出现；不满足时整个不显示'}。` : `<span class="dim">还没加条件：这个选项${mode === 'lock' ? '一直能选' : '一直显示'}。</span>`)
+          + (other ? `<br><span class="dim">另外还设了「${mode === 'lock' ? '满足才显示' : '满足才能选'}」，保存时一起保留。</span>` : '');
       };
       const draw = () => {
-        box.innerHTML = rows.map(rowHtml).join('') || '<div class="dim">还没加条件：点下面的「＋ 开关 / ＋ 变量」</div>';
+        box.innerHTML = rows.map(rowHtml).join('') || '<div class="dim">点下面的「＋ 开关 / ＋ 变量 / ＋ 物品」加条件</div>';
         $$('#ccMode button', d).forEach(b => b.classList.toggle('on', b.dataset.cm === mode));
         $$('.ccrow', box).forEach(el => {
           const i = Number(el.dataset.i);
-          $$('[data-f]', el).forEach(ctrl => {
-            ctrl.addEventListener(ctrl.tagName === 'SELECT' ? 'change' : 'input', () => {
-              const f = ctrl.dataset.f;
-              if (f === 'id') rows[i].id = Number(ctrl.value);
-              else if (f === 'on') rows[i].off = ctrl.value === '0';
-              else rows[i][f] = ctrl.value;
-              sync();
-            });
-          });
-          const del = $('[data-del]', el);
-          if (del) del.onclick = () => { rows.splice(i, 1); draw(); };
+          $$('[data-f]', el).forEach(ctrl => ctrl.addEventListener(ctrl.tagName === 'SELECT' ? 'change' : 'input', () => {
+            const f = ctrl.dataset.f;
+            if (f === 'id') rows[i].id = Number(ctrl.value);
+            else if (f === 'on') rows[i].off = ctrl.value === '0';
+            else rows[i][f] = ctrl.value;
+            sync();
+          }));
+          const x = $('[data-del]', el);
+          if (x) x.onclick = () => { rows.splice(i, 1); draw(); };
         });
         sync();
       };
-      $$('#ccMode button', d).forEach(b => b.onclick = () => { mode = b.dataset.cm; if (mode === 'none') rows = []; draw(); });
+      $$('#ccMode button', d).forEach(b => b.onclick = () => { sync(); mode = b.dataset.cm; rows = ccParse(need[mode]); draw(); });
       $$('[data-add]', d).forEach(b => b.onclick = () => {
         const k = b.dataset.add;
-        if (mode === 'none') mode = 'lock';
         rows.push(k === 'switch' ? { type: 'switch', id: (sws[0] || {}).id || 1, off: false }
-          : k === 'var' ? { type: 'var', id: (vrs[0] || {}).id || 1, op: '<', value: '0' }
-            : { type: 'raw', text: '' });
+          : k === 'var' ? { type: 'var', id: (vrs[0] || {}).id || 1, op: '>=', value: '1' }
+            : k === 'item' ? { type: 'item', id: (its[0] || {}).id || 1, off: false }
+              : { type: 'raw', text: '' });
         draw();
       });
+      $('[data-clear]', d).onclick = () => { rows = []; draw(); };
       $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
       $('[data-ok]', d).onclick = async () => {
-        const built = ccBuild(rows);
-        const disable = mode === 'lock' ? built : mode === 'hide' ? keep.disable : '';
-        const hide = mode === 'hide' ? built : mode === 'lock' ? keep.hide : '';
-        try { await api('choice/cond', { at, line, disable, hide }); done({ ok: '已保存选项条件' }); }
+        sync();
+        try { await api('choice/cond', { at, line, lockNeed: need.lock, hideNeed: need.hide }); done({ ok: '已保存选项条件' }); }
         catch (e) { $('#ccErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }
       };
       draw();

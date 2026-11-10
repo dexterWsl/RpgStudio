@@ -147,7 +147,7 @@ function createStudio(opts) {
     const gallery = createGallery(project, xref, { pictures: picOptions });
     const progress = createProgress(project, xref, { saved: () => settings().progress || null, profile, where: at => where(at) });
     const validator = createValidator(project);
-    // 存的剧情里用到了 #飘字 / #动作：游戏里还没有演出插件就装上
+    // 存的剧情里用到了演出插件（#飘字 #动作 #扮演、带人的 #传送、选项条件）：游戏里还没有就装上 / 旧了就更新
     const afterWrite = files => {
       try {
         const lists = [];
@@ -157,7 +157,7 @@ function createStudio(opts) {
           if (f === 'CommonEvents.json' && Array.isArray(d)) for (const ce of d) if (ce) lists.push(ce.list);
           if (f === 'Troops.json' && Array.isArray(d)) for (const t of d) for (const pg of (t && t.pages) || []) lists.push(pg.list);
         }
-        if (lists.some(stagePlugin.usesStage)) stagePlugin.ensure(project.gameRoot());
+        if (lists.some(stagePlugin.wants)) stagePlugin.ensure(project.gameRoot());
       } catch (e) { console.error('[studio] 演出插件：' + e.message); }
       onWrite(files);
     };

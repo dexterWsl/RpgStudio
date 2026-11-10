@@ -33,6 +33,7 @@ const CONT_OF = { 401: 101, 405: 105, 408: 108, 655: 355, 657: 357, 505: 205, 60
 
 const { createTextCodes } = require('./textcodes.js');
 const choicecond = require('./choicecond.js');
+const stage = require('./stage.js');
 
 function createDescriber(project, opts = {}) {
   const codes = createTextCodes(project);
@@ -87,7 +88,7 @@ function createDescriber(project, opts = {}) {
       case 0: return '结束';
       case 101: return '对话框' + (p[4] ? '｜' + P.expandN(p[4]) : '') + (p[0] ? `（头像 ${p[0]} #${p[1]}）` : '');
       case 401: return P.expandN(p[0]);
-      case 102: return '选项：' + (p[0] || []).map(P.expandN).join(' / ');
+      case 102: return '选项：' + (p[0] || []).map(l => { const c = choicecond.split(l); return P.expandN(c.text.trim()) + (c.disable || c.hide ? '（有条件）' : ''); }).join(' / ');
       // 选项文字前面可能挂着插件条件（<<[..]>> / (([..]))）：阅读视图里条件单独显示，文字只留选项本身
       case 402: return '选了「' + P.expandN(choicecond.split(p[1] ?? '').text.trim()) + '」';
       case 403: return '按取消时';
@@ -198,14 +199,30 @@ function createDescriber(project, opts = {}) {
       case 354: return '回到标题';
       case 355: return '脚本：' + short(p[0]);
       case 655: return '　' + short(p[0]);
-      case 356: return '插件指令：' + short(p[0]);
+      case 356: return stageText(c) || '插件指令：' + short(p[0]);
       case 357: {
+        const st = stageText(c);
+        if (st) return st;
         const args = Object.values(p[3] || {}).filter(v => typeof v === 'string' && v).slice(0, 2).map(v => short(v, 20)).join('，');
         return `插件：${p[0] || ''} ${p[1] || ''}` + (args ? `（${args}）` : '');
       }
       case 657: return '　' + short(p[0]);
     }
     return `其他指令（${c.code}）`;
+  }
+
+  // 演出插件（编辑器自己的 RpgStudio_Stage）的指令：说人话
+  function stageText(c) {
+    const pc = stage.parseCmd(c);
+    if (!pc) return '';
+    const a = pc.args, s = k => String(a[k] == null ? '' : a[k]);
+    switch (pc.cmd) {
+      case 'float': return `飘字（${s('who') || '主角'}）：${short(s('text'), 40)}`;
+      case 'act': return `动作：${s('who')} ${s('steps')}${s('wait') === 'false' ? '（不等）' : ''}`;
+      case 'as': return ['主角', '玩家', ''].includes(s('who')) ? '换回主角的样子' : `扮演 ${s('who')}${s('sheet') ? `（行走图 ${s('sheet')} ${Number(a.index) || 0}）` : ''}：主角的小人换成${s('who')}，场景播完换回`;
+      case 'transfer': return `传送${s('who') ? `（换成${s('who')}演）` : ''}到 ${L('map', Number(a.map))} (${Number(a.x)}, ${Number(a.y)})${DIRS[a.dir] && Number(a.dir) ? '，朝' + DIRS[a.dir] : ''}${s('steps') ? '，到了以后 ' + s('steps') : ''}`;
+    }
+    return '';
   }
 
   // 事件页的出现条件 → 一组短句；没有条件 = 一直出现
@@ -290,9 +307,11 @@ function createDescriber(project, opts = {}) {
         const cc = choicecond.split(p[1] ?? '');
         row.label = cc.text;
         if (cc.disable || cc.hide) {
-          row.cond = { disable: cc.disable, hide: cc.hide };
+          // 给人看「要满足什么」（标记里写的是反过来的「什么时候不让选」）
           const nm = (kind, id) => { try { return P.name(kind, id); } catch { return ''; } };
-          row.condText = [cc.disable ? choicecond.describe(cc.disable, nm) : '', cc.hide ? choicecond.describe(cc.hide, nm) : ''].filter(Boolean).join('；');
+          const need = choicecond.needs(p[1], nm);
+          row.cond = { disable: cc.disable, hide: cc.hide, lockNeed: cc.disable ? choicecond.negate(cc.disable) : '', hideNeed: cc.hide ? choicecond.negate(cc.hide) : '' };
+          row.condText = [need.hide ? need.hide + ' 才显示' : '', need.lock ? need.lock + ' 才能选（不然是灰的）' : ''].filter(Boolean).join('；');
         }
       }
       const refs = refsOf(c);

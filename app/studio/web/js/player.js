@@ -177,8 +177,15 @@ function playTimeline(tl, title) {
     said++;
     els.count.textContent = `第 ${said} 句`;
   }
-  function ask(question, options, onPick) {
-    els.ask.innerHTML = `${question ? `<div class="pl-q">${esc(question)}</div>` : ''}${options.map((o, i) => `<button type="button" data-ask="${i}">${esc(o)}</button>`).join('')}`;
+  // conds[i] = { lock, hide }：这个选项要满足什么才能选 / 才出现（预览不知道游戏进度，照样能点，只是标出来）
+  function ask(question, options, onPick, conds = []) {
+    const optHtml = (o, i) => {
+      const c = conds[i];
+      if (!c) return `<button type="button" data-ask="${i}">${esc(o)}</button>`;
+      const why = [c.hide ? '满足「' + c.hide + '」才出现' : '', c.lock ? '满足「' + c.lock + '」才能选，不然是灰的' : ''].filter(Boolean).join('；');
+      return `<button type="button" data-ask="${i}" class="${c.lock ? 'pl-locked' : 'pl-maybe'}" title="${esc(why)}">${esc(o)}<small>${esc(why)}</small></button>`;
+    };
+    els.ask.innerHTML = `${question ? `<div class="pl-q">${esc(question)}</div>` : ''}${options.map(optHtml).join('')}`;
     els.ask.hidden = false;
     waiting = true;
     $$('[data-ask]', els.ask).forEach(b => b.onclick = e => { e.stopPropagation(); els.ask.hidden = true; waiting = false; onPick(Number(b.dataset.ask)); stage.focus(); next(); });
@@ -209,7 +216,7 @@ function playTimeline(tl, title) {
       else if (s.t === 'call') stack.push({ steps: s.steps, i: 0 });
       else if (s.t === 'choice') {
         const opts = [...s.options, ...(s.cancel ? ['（按取消）'] : [])];
-        ask('', opts, k => { const b = k < s.options.length ? s.branches[k] : s.cancel; if (b && b.length) stack.push({ steps: b, i: 0 }); });
+        ask('', opts, k => { const b = k < s.options.length ? s.branches[k] : s.cancel; if (b && b.length) stack.push({ steps: b, i: 0 }); }, s.conds || []);
         return;
       } else if (s.t === 'if') {
         ask('如果 ' + s.cond + '？', ['成立', '不成立'], k => { const b = k === 0 ? s.yes : s.no; if (b && b.length) stack.push({ steps: b, i: 0 }); });
@@ -258,7 +265,7 @@ function storyboardHtml(steps, depth = 0) {
     if (s.t === 'fade') return `<div class="sb-ev">${s.out ? '画面淡出' : '画面淡入'}</div>`;
     if (s.t === 'note') return `<div class="sb-ev">${esc(s.text)}</div>`;
     if (s.t === 'call') return `<div class="sb-ev">播「${esc(s.name)}」</div><div class="sb-in">${storyboardHtml(s.steps, depth + 1)}</div>`;
-    if (s.t === 'choice') return `<div class="sb-ev sb-ch">选项：${s.options.map(esc).join(' / ')}</div>${s.options.map((o, i) => `<div class="sb-br">选「${esc(o)}」</div><div class="sb-in">${storyboardHtml(s.branches[i] || [], depth + 1) || '<div class="sb-ev faint">（什么都不做）</div>'}</div>`).join('')}`;
+    if (s.t === 'choice') return `<div class="sb-ev sb-ch">选项：${s.options.map(esc).join(' / ')}</div>${s.options.map((o, i) => `<div class="sb-br">选「${esc(o)}」${s.conds && s.conds[i] ? `<span class="sb-cond">${esc([s.conds[i].hide ? '满足「' + s.conds[i].hide + '」才出现' : '', s.conds[i].lock ? '满足「' + s.conds[i].lock + '」才能选' : ''].filter(Boolean).join('；'))}</span>` : ''}</div><div class="sb-in">${storyboardHtml(s.branches[i] || [], depth + 1) || '<div class="sb-ev faint">（什么都不做）</div>'}</div>`).join('')}`;
     if (s.t === 'if') return `<div class="sb-ev sb-ch">如果 ${esc(s.cond)}</div><div class="sb-br">成立</div><div class="sb-in">${storyboardHtml(s.yes, depth + 1)}</div>${s.no.length ? `<div class="sb-br">不成立</div><div class="sb-in">${storyboardHtml(s.no, depth + 1)}</div>` : ''}`;
     return '';
   };
