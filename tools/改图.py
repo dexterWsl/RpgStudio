@@ -7,7 +7,7 @@
 ----
   双击「改图.cmd」，或者命令行：python 改图.py [图片] [--宽 1104 --高 621]
 
-  · 打开图片（Ctrl+O，也可以直接把图拖进窗口）
+  · 打开图片（Ctrl+O），也可以直接把图片从资源管理器拖进窗口
   · 左键拖动 = 挪位置；滚轮 = 缩放（以鼠标那一点为中心）
   · 方向键 = 挪 1 像素，Shift+方向键 = 挪 10 像素
   · F 适应画面　H 适应高度　W 适应宽度　1 = 原大小　G 居中　C 参考线
@@ -19,6 +19,7 @@
 
 import os
 import sys
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -127,7 +128,7 @@ class App:
         cb.pack(side="left", padx=(4, 12))
         cb.bind("<<ComboboxSelected>>", lambda _e: self.set_bg())
         ttk.Button(bar2, text="参考线", command=self.toggle_guides).pack(side="left")
-        ttk.Label(bar2, text="左键拖动 · 滚轮缩放 · 方向键微调 · F 适应 · Ctrl+S 导出",
+        ttk.Label(bar2, text="把图片拖进窗口 · 左键拖动 · 滚轮缩放 · 方向键微调 · F 适应 · Ctrl+S 导出",
                   foreground="#777").pack(side="left", padx=(14, 0))
 
         self.canvas = tk.Canvas(self.root, highlightthickness=0, background="#1b1b1f")
@@ -277,6 +278,15 @@ class App:
                                        filetypes=[("图片", "*.png *.jpg *.jpeg *.webp *.bmp *.gif"), ("所有文件", "*.*")])
         if p:
             self.load(p)
+
+    def drop_paths(self, paths):
+        """从资源管理器拖进来的文件：打开第一个能读的，其余只提示。"""
+        good = [p for p in (paths or []) if os.path.isfile(p)]
+        if not good:
+            return
+        self.load(good[0])
+        if len(good) > 1:
+            self.status.configure(text="拖进来 %d 个文件，先打开第一个：%s" % (len(good), os.path.basename(good[0])))
 
     def export_dialog(self):
         if self.src is None:
@@ -437,6 +447,136 @@ def dpi_aware():
             return False
 
 
+def _drop_log(msg):
+    """拖放出问题时留个记录：%TEMP%\\改图-拖放.log（正常用不到，出问题才看）。"""
+    try:
+        import tempfile
+        with open(os.path.join(tempfile.gettempdir(), "改图-拖放.log"), "a", encoding="utf-8") as f:
+            f.write("%s  %s\n" % (time.strftime("%H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
+def enable_drop(root, on_paths):
+    """把文件从资源管理器直接拖进窗口（Windows 的 WM_DROPFILES）。
+
+    要点（踩过的坑）：
+      · 窗口过程里**不碰 Tk** —— 拖放时 Tk 正停在自己的消息循环里，从窗口过程回调 Tcl 会崩；
+        这里只把路径塞进队列，由 Tk 自己的 after 循环取出来再打开。
+      · 先读出旧的窗口过程、存好，再把新的挂上去，避免中间来一条消息时旧指针还是空的。
+      · 整个窗口过程用 try 包住，出任何事都退回老过程，绝不让异常穿过 ctypes。
+
+    挂不上（非 Windows、权限、别的工具也挂过）就返回 False，其它功能照常用。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        WM_DROPFILES = 0x0233
+        GWLP_WNDPROC = -4
+        GA_ROOT = 2
+
+        shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+        shell32.DragQueryFileW.restype = wintypes.UINT
+        shell32.DragFinish.argtypes = [wintypes.HANDLE]
+        shell32.DragFinish.restype = None
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT,
+                                           wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallWindowProcW.restype = ctypes.c_longlong
+        user32.GetParent.argtypes = [wintypes.HWND]
+        user32.GetParent.restype = wintypes.HWND
+        user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        user32.GetAncestor.restype = wintypes.HWND
+        shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+        shell32.DragAcceptFiles.restype = None
+        getter = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        getter.argtypes = [wintypes.HWND, ctypes.c_int]
+        getter.restype = ctypes.c_void_p
+        setter = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
+        setter.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        setter.restype = ctypes.c_void_p
+
+        root.update_idletasks()
+        child = root.winfo_id()
+        hwnd = user32.GetAncestor(child, GA_ROOT) or user32.GetParent(child) or child
+        # 只挂在自己这个窗口上（挂错窗口是致命的）
+        cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetClassNameW(hwnd, cls, 64)
+        if not cls.value.startswith("Tk"):
+            _drop_log("窗口类不是 Tk（%r），放弃挂拖放" % cls.value)
+            return False
+        old = getter(wintypes.HWND(hwnd), GWLP_WNDPROC)
+        if not old:
+            _drop_log("读不到旧的窗口过程，放弃挂拖放")
+            return False
+
+        WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+        state = {"old": old, "proc": None, "drop": []}
+
+        def _proc(h, msg, wp, lp):
+            try:
+                if msg == WM_DROPFILES:
+                    if wp:
+                        total = int(shell32.DragQueryFileW(wp, 0xFFFFFFFF, None, 0))
+                        files = []
+                        for i in range(min(total, 16)):
+                            ln = int(shell32.DragQueryFileW(wp, i, None, 0))
+                            if ln <= 0:
+                                continue
+                            buf = ctypes.create_unicode_buffer(ln + 1)
+                            shell32.DragQueryFileW(wp, i, buf, ln + 1)
+                            if buf.value:
+                                files.append(buf.value)
+                        shell32.DragFinish(wp)
+                        if files:
+                            state["drop"].extend(files)   # 只入队，不在这里碰 Tk
+                            _drop_log("收到拖放 %d 个：%s" % (len(files), files[0]))
+                    return 0
+            except Exception as e:
+                _drop_log("处理拖放出错：%r" % (e,))
+            try:
+                return user32.CallWindowProcW(state["old"], h, msg, wp, lp)
+            except Exception:
+                return 0
+
+        proc = WNDPROC(_proc)
+        state["proc"] = proc                     # 留住引用，别被回收
+        enablers.append(state)
+        setter(wintypes.HWND(hwnd), GWLP_WNDPROC, ctypes.cast(proc, ctypes.c_void_p))
+        shell32.DragAcceptFiles(wintypes.HWND(hwnd), True)
+        _drop_log("挂上拖放：hwnd=%s" % hwnd)
+
+        def _pump():
+            # 在 Tk 自己的循环里取队列 —— 打开图片、弹提示都只在这里做
+            try:
+                if state["drop"]:
+                    paths = state["drop"][:]
+                    del state["drop"][:]
+                    _drop_log("打开：%s" % (paths[0] if paths else "")) 
+                    on_paths(paths)
+            except Exception as e:
+                _drop_log("打开拖进来的文件失败：%r" % (e,))
+            try:
+                root.after(120, _pump)
+            except Exception:
+                pass
+
+        root.after(120, _pump)
+        return True
+    except Exception as e:
+        _drop_log("挂拖放失败：%r" % (e,))
+        return False
+
+
+enablers = []
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="把图片摆进固定画面框（默认 1104×621）再导出")
@@ -452,6 +592,8 @@ def main():
         pass
     root.minsize(680, 420)
     app = App(root, a.image, a.w, a.h)
+    # 等窗口彻底建好、Tk 空闲了再挂拖放（不要在启动过程中去改窗口过程）
+    root.after(300, lambda: enable_drop(root, app.drop_paths))
     root.mainloop()
     return 0
 
