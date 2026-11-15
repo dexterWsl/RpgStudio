@@ -4,6 +4,7 @@
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
 const { need, int, clone, UserError } = require('../lib/util.js');
 const Maps = require('../core/maps.js');
+const marks = require('../core/marks.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -18,6 +19,7 @@ module.exports = function (ctx) {
         conditionText: T.describer.pageConditions(pg.conditions),
         trigger: pg.trigger,
         image: pg.image,
+        mark: marks.get(pg.list),
         lines: ctx.lineCount(pg.list),
         first: ctx.firstLine(pg.list),
       })),

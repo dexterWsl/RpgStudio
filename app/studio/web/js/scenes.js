@@ -43,6 +43,7 @@ async function sceneDialog(opts = {}, st = null) {
             <button type="button" class="small" data-ins2="as" title="场景里主角的小人换成别人，场景播完自动换回">插扮演…</button>
             <button type="button" class="small" data-ins2="float">插飘字…</button>
             <button type="button" class="small" data-ins2="act">插动作…</button>
+            <button type="button" class="small" data-ins="bol" aria-expanded="false">插气泡…</button>
             <button type="button" class="small" data-sins="#清图">#清图</button>
           </div>
           <div id="scPics" class="picture-picker scpics" hidden></div>
@@ -128,6 +129,19 @@ async function sceneDialog(opts = {}, st = null) {
           pickBox.hidden = false;
           pickBox.textContent = '正在读取…';
           try {
+            if (kind === 'bol') {
+              const shapes = ['！', '？', '♪', '♥', '怒', '汗', '乱', '…', '灯', 'Zzz'];
+              let who = '本事件';
+              pickBox.innerHTML = '<div class="csec" style="margin:0 0 4px"><span class="csec-t">冒在谁头上</span></div><div class="balwho">'
+                + ['本事件', '主角'].map(w => '<button type="button" class="small' + (w === who ? ' on' : '') + '" data-bw="' + w + '">' + w + '</button>').join('')
+                + '</div><div class="balgrid">' + shapes.map(s => '<button type="button" data-bs="' + s + '" title="插入「' + s + '」">' + s + '</button>').join('') + '</div>';
+              $$('[data-bw]', pickBox).forEach(b => b.onclick = () => {
+                who = b.dataset.bw;
+                $$('[data-bw]', pickBox).forEach(x => x.classList.toggle('on', x === b));
+              });
+              $$('[data-bs]', pickBox).forEach(b => b.onclick = () => { insert(balloonTextFor(who, b.dataset.bs) + '\n'); closePick(); });
+              return;
+            }
             if (kind === 'pic') {
               const { names } = await api('images?sub=pictures');
               if (pickKind !== 'pic') return;
@@ -140,8 +154,24 @@ async function sceneDialog(opts = {}, st = null) {
             const label = kind === 'item' ? '物品' : '变量';
             const list = rows.filter(r => r.name);
             if (!list.length) { pickBox.innerHTML = '<div class="dim">这个工程里还没有' + label + '</div>'; return; }
-            pickBox.innerHTML = '<div class="picture-filters"><input type="search" placeholder="搜索' + label + '（共 ' + list.length + ' 个）"></div><div class="insgrid"></div>';
+            pickBox.innerHTML = '<div class="picture-filters"><input type="search" placeholder="搜索' + label + '（共 ' + list.length + ' 个）"></div><div class="insgrid"></div>'
+              + (kind === 'var' ? '<div class="cnew"><input id="scVarNewName" maxlength="40" placeholder="新建变量：名字"><button type="button" class="small" id="scVarNewOk">＋ 新建</button></div>' : '');
             const q = $('input', pickBox), grid = $('.insgrid', pickBox);
+            if (kind === 'var') {
+              const nameIn = $('#scVarNewName', pickBox), okBtn = $('#scVarNewOk', pickBox);
+              const create = async () => {
+                const nm = nameIn.value.trim();
+                if (!nm) { nameIn.focus(); return; }
+                try {
+                  const x = await api('name', { kind: 'var', id: 'new', name: nm });
+                  S.lookups = {};
+                  insert('#变量 ' + (x && x.name ? x.name : nm) + ' + 1\n');
+                  closePick();
+                } catch (e) { err(e.message); }
+              };
+              okBtn.onclick = create;
+              nameIn.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); create(); } };
+            }
             const draw = () => {
               const s = q.value.trim().toLowerCase();
               const hit = list.filter(r => !s || String(r.name).toLowerCase().includes(s) || String(r.id) === s).slice(0, 400);

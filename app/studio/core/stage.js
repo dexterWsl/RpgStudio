@@ -17,9 +17,10 @@
 const fs = require('fs');
 const path = require('path');
 const { MARK } = require('./scenes.js');
+const marks = require('./marks.js');
 
 const PLUGIN = 'RpgStudio_Stage';
-const VERSION = 8;
+const VERSION = 15;
 const DESCRIPTION = 'rpgStudio 演出：飘字、按名字动、场景里换人演、选项条件';
 
 // 插件指令和参数（MZ 的插件指令每个参数一行续行「谁 = 林屿」，跟 RPG Maker MZ 编辑器写出来的一样）
@@ -155,6 +156,7 @@ const pluginSource = () => `//==================================================
   const CODES = ${JSON.stringify(STEP_CODES)};
   const BALLOONS = ${JSON.stringify(BALLOON_STEPS)};
   const SCENE_MARK = ${JSON.stringify(MARK)};
+  const EV_MARK = "<RpgStudioMark>";   // 事件页最前面的标识注释，见 core/marks.js
   const hasPlugin = n => typeof $plugins !== "undefined" && $plugins.some(p => p && p.status && p.name === n);
 
   // ---------- 找人 ----------
@@ -240,10 +242,19 @@ const pluginSource = () => `//==================================================
     Sprite.prototype.update.call(this);
     const f = this._f;
     let bx, by;
+    if (f.still && f.screen) { this.visible = true; this.x = f.x; this.y = f.y; this.opacity = 255; return; }
     if (f.screen) { bx = f.x; by = f.y; }
     else {
       const ch = charOf(f.ref);
       if (!ch) { this.visible = false; return; }
+      // 事件标识：挂在头顶不动、不淡出（飘字会往上飘，标识要一直在）
+      if (f.still) {
+        this.visible = true;
+        this.x = Math.round(ch.screenX());
+        this.y = Math.max(30, Math.round(ch.screenY() - 58));
+        this.opacity = 255;
+        return;
+      }
       bx = ch.screenX(); by = ch.screenY() - 54;
     }
     const k = f.t / f.life;
@@ -259,6 +270,35 @@ const pluginSource = () => `//==================================================
     this.x = Math.max(half, Math.min(Graphics.width - half, this.x));
   };
 
+  // 事件标识的气泡：自己播 Balloon.png，挂在人物头顶，位置由我定（不受引擎图层影响）
+  function Sprite_RsMark(f) { this.initialize(...arguments); }
+  Sprite_RsMark.prototype = Object.create(Sprite.prototype);
+  Sprite_RsMark.prototype.constructor = Sprite_RsMark;
+  Sprite_RsMark.prototype.initialize = function(f) {
+    Sprite.prototype.initialize.call(this);
+    this._f = f;
+    this.bitmap = ImageManager.loadSystem("Balloon");
+    this.anchor.x = 0.5;
+    this.anchor.y = 1;
+    this.visible = false;
+  };
+  Sprite_RsMark.prototype.update = function() {
+    Sprite.prototype.update.call(this);
+    const f = this._f;
+    const ch = charOf(f.ref);
+    if (!ch || !this.bitmap || !this.bitmap.isReady()) { this.visible = false; return; }
+    this.x = Math.round(ch.screenX());
+    this.y = Math.max(56, Math.round(ch.screenY() - 36));
+    // 150 帧一轮：前 48 帧把气泡播完（8 格 × 6 帧），其余时间藏着
+    const t = (f.t || 0) % 150;
+    if (t < 48) {
+      this.visible = true;
+      this.setFrame(Math.min(7, Math.floor(t / 6)) * 48, (f.balloon - 1) * 48, 48, 48);
+    } else {
+      this.visible = false;
+    }
+  };
+
   function FloatLayer() { this.initialize(...arguments); }
   FloatLayer.prototype = Object.create(Sprite.prototype);
   FloatLayer.prototype.constructor = FloatLayer;
@@ -267,7 +307,7 @@ const pluginSource = () => `//==================================================
     const list = floats();
     const live = new Set(list.map(f => f.id));
     for (const [id, sp] of this._map) if (!live.has(id)) { this.removeChild(sp); if (sp.bitmap && sp.bitmap.destroy) sp.bitmap.destroy(); this._map.delete(id); }
-    for (const f of list) if (!this._map.has(f.id)) { const sp = new Sprite_RsFloat(f); this._map.set(f.id, sp); this.addChild(sp); }
+    for (const f of list) if (!this._map.has(f.id)) { const sp = f.balloon ? new Sprite_RsMark(f) : new Sprite_RsFloat(f); this._map.set(f.id, sp); this.addChild(sp); }
     Sprite.prototype.update.call(this);
   };
 
@@ -277,13 +317,108 @@ const pluginSource = () => `//==================================================
     if (this instanceof Spriteset_Map) { this._rsFloatLayer = new FloatLayer(); this.addChild(this._rsFloatLayer); }
     _createPictures.call(this);
   };
+  // ---------- 事件标识：页最前面写了 <RpgStudioMark> ♥ 的，这一页生效时头顶一直有标记 ----------
+  //   气泡符号（！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz）→ 隔 2.5 秒冒一次；其它文字（ev、序章…）→ 常驻小字
+  const markOf = list => {
+    for (let i = 0; i < (list || []).length; i++) {
+      const c = list[i];
+      if (c && c.code === 108 && String((c.parameters || [])[0] || "").indexOf(EV_MARK) === 0) return String(c.parameters[0]).slice(EV_MARK.length).trim();
+    }
+    return "";
+  };
+  const markOfEvent = ev => {
+    const pi = ev._pageIndex;
+    if (ev._rsMarkPi !== pi) { ev._rsMarkPi = pi; ev._rsMark = markOf(ev.page() && ev.page().list); }
+    return ev._rsMark || "";
+  };
+  let markFrame = 0;
+  let markLogged = "";
+  const RS_DEBUG = typeof location !== "undefined" && /[?&]rsdebug=1/.test(location.search);
+  const debugText = text => {
+    const list = floats();
+    let f = null;
+    for (const x of list) if (x.id === -9999) { f = x; break; }
+    if (f && f.text === text) return;
+    if (f) list.splice(list.indexOf(f), 1);
+    list.push({ id: -9999, text, t: 0, life: Infinity, dx: 0, screen: true, x: Math.round(Graphics.width / 2), y: 46, lift: 0, shown: 0, still: true });
+  };
+  function tickMarks() {
+    const alive = new Set();
+    const found = [];
+    for (const ev of $gameMap.events()) {
+      if (!ev || ev._erased || !ev.page) continue;
+      const m = markOfEvent(ev);
+      if (!m) continue;
+      const key = ev.eventId();
+      alive.add(key);
+      found.push(key + "=" + m + "(第" + (ev._pageIndex + 1) + "页)");
+      // 自己画：气泡符号用 Balloon.png 的贴图逐帧播，别的一律当小字。
+      // 不用原生的 requestBalloon —— 它挂在 tilemap 上，会被有图像的事件自己挡住。
+      const bid = BALLOONS[m] || 0;
+      const list = floats();
+      let f = null;
+      for (const x of list) if (x.id === -key) { f = x; break; }
+      const sig = bid ? "balloon" + bid : "text" + m;
+      if (f && f.sig !== sig) { list.splice(list.indexOf(f), 1); f = null; }
+      if (!f) {
+        f = { id: -key, sig, t: 0, life: Infinity, dx: 0, screen: false, ref: { e: key }, lift: 0, shown: 0 };
+        if (bid) f.balloon = bid; else { f.text = m; f.still = true; f.big = true; }
+        list.push(f);
+      }
+    }
+    const list = floats();
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].still && !alive.has(-list[i].id)) list.splice(i, 1);
+
+
+    if (RS_DEBUG) {
+      const ev21 = $gameMap.event(21);
+      const p21 = ev21 ? (ev21._pageIndex + 1) : "?";
+      const v39 = $gameVariables ? $gameVariables.value(39) : "?";
+      debugText("EV021 第" + p21 + "页｜变量39=" + v39 + "｜扫到：" + (found.length ? found.join("；") : "无"));
+    }
+    // 换地图后打一行日志，方便排查「标识到底扫到没有」
+    const tag = $gameMap.mapId() + ":" + found.join(",");
+    if (tag !== markLogged) {
+      markLogged = tag;
+      console.log(NAME + "：地图 " + $gameMap.mapId() + " 的标识 " + (found.length ? found.join("；") : "（这一页没有）"));
+    }
+  }
   const _mapUpdate = Scene_Map.prototype.update;
   Scene_Map.prototype.update = function() {
     _mapUpdate.call(this);
+    if (++markFrame % 10 === 0) { try { tickMarks(); } catch (e) { console.error(NAME + "：事件标识出错", e); } }
     const list = floats();
     if (!list.length) return;
-    for (const f of list) f.t++;
-    $gameTemp._rsFloats = list.filter(f => f.t < f.life);
+    for (const f of list) if (f.life !== Infinity || f.balloon) f.t++;
+    $gameTemp._rsFloats = list.filter(f => f.life === Infinity || f.t < f.life);
+  };
+
+  // ---------- 气泡画在角色之上 ----------
+  //   MZ 的 _effectsContainer 就是 tilemap 本身，角色精灵压在它上面：
+  //   有图像的事件（比如门）会把自己的气泡整个挡住。这里给气泡单开一层，加在角色后面。
+  function balloonLayer(spriteset) {
+    if (!spriteset._rsBalloonLayer) {
+      const layer = new Sprite();
+      if (spriteset._baseSprite) spriteset._baseSprite.addChild(layer); else spriteset.addChild(layer);
+      spriteset._rsBalloonLayer = layer;
+    }
+    return spriteset._rsBalloonLayer;
+  }
+  const _createBalloon = Spriteset_Map.prototype.createBalloon;
+  Spriteset_Map.prototype.createBalloon = function(request) {
+    const targetSprite = this.findTargetSprite(request.target);
+    if (!targetSprite) return;
+    const sprite = new Sprite_Balloon();
+    sprite.targetObject = request.target;
+    sprite.setup(targetSprite, request.balloonId);
+    balloonLayer(this).addChild(sprite);
+    (this._balloonSprites = this._balloonSprites || []).push(sprite);
+  };
+  const _removeBalloon = Spriteset_Map.prototype.removeBalloon;
+  Spriteset_Map.prototype.removeBalloon = function(sprite) {
+    if (this._balloonSprites) this._balloonSprites.remove(sprite);
+    if (sprite.parent) sprite.parent.removeChild(sprite);
+    if (sprite.targetObject && sprite.targetObject.endBalloon) sprite.targetObject.endBalloon();
   };
 
   // ---------- 动作 ----------
@@ -562,7 +697,7 @@ function commands(cmd, args, mz) {
 }
 const hasChoiceCond = list => (list || []).some(c => c && c.code === 102 && (c.parameters[0] || []).some(t => /<<\[.*?\]>>|\(\(\[.*?\]\)\)/.test(String(t))));
 const usesStage = list => (list || []).some(isStageCmd);
-const wants = list => usesStage(list) || hasChoiceCond(list);
+const wants = list => usesStage(list) || hasChoiceCond(list) || !!marks.get(list);
 
 // 装上 / 更新插件；返回做了什么（'' = 本来就装好了）
 function ensure(root) {

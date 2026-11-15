@@ -225,7 +225,8 @@ function layoutEvents() {
     const trig = e.pages.some(p => p.trigger === 3) ? 'auto' : e.pages.some(p => p.trigger === 4) ? 'par' : '';
     b.title = `${e.id} ${e.name}\n${pg.first || (e.pages.find(p => p.first) || {}).first || ''}${stg}\n拖动可以换位置`;
     b.setAttribute('aria-label', `事件 ${e.id} ${e.name}`);
-    b.innerHTML = `<span class="spr"></span>${trig ? `<span class="mk ${trig}"></span>` : ''}<span class="lb">${esc(e.name)}</span>`;
+    const mkText = pg.mark || '';
+    b.innerHTML = `<span class="spr"></span>${trig ? `<span class="mk ${trig}"></span>` : ''}${mkText ? `<span class="evmark">${esc(mkText)}</span>` : ''}<span class="lb">${esc(e.name)}</span>`;
     eventGraphic($('.spr', b), pg.image, D).then(ok => { if (!ok) { b.classList.add('noimg'); if (D >= 14) b.insertAdjacentHTML('afterbegin', `<span class="glyph">${esc((e.name || '?').slice(0, 1))}</span>`); } });
     bindEventDrag(b, e);
     layer.appendChild(b);

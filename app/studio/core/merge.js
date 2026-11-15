@@ -612,7 +612,7 @@ function createMerger(ctx) {
   // 做法：原来的 ■ 行和编辑框里的 ■ 行各自按「选项 → 分支 → 里面的内容」建成树，一层层对齐；
   //   同一个选项的分支按字对齐（最长公共子序列），对不上的按位置配对（= 改了字，里面的 ■ 行要对得上），
   //   多出来的是新选项，少了的是删掉的选项（连同里面所有指令）。选项变了就重写选项列表、分支编号，取消 / 默认选项跟着挪。
-  function mergeList(list, text, opts = {}) {
+  function _mergeList(list, text, opts = {}) {
     const scene = opts.scene != null ? !!opts.scene : isSceneList(list);   // 场景（公共事件带场景标记）里才能 #扮演、#传送 选人
     list = list || [];
     const al = opts.analysis || analyzeList(list, opts);
@@ -637,7 +637,12 @@ function createMerger(ctx) {
     const STRUCT = '带 ■ 的行是原来的结构（条件、插件、音效、选项的开头和结尾等），不能删除或挪动；条件行（■ 如果 …）可以改条件本身，选项只能改「■ 选了「…」」那一行、加一行或删掉。';
     // 想加插件指令却写了 ■ 行：告诉他编辑器里的写法
     const pluginHint = t => (t && /^■\s*插件/.test(t.line) ? '（要加插件指令，写成「#插件 插件名 指令名（参数…）」，参数按插件里的顺序用「，」隔开；插件里写了参数表才写得出来）' : '');
-    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') + pluginHint(t) : '带 ■ / # 的结构行不能删除：少了「' + e.line + '」');
+    // 条件结构行删掉时，告诉他在哪儿能拆（编辑框里删结构行是不行的：那一段原来的指令跟内容怎么对齐就说不清了）
+    const condHint = x => {
+      const l = x && x.line ? String(x.line) : '';
+      return /^[■#＃]\s*(如果|否则|条件结束|结束)/.test(l) ? '（条件分支是结构行，不能在这里删：在「规范」里点这个「如果」右边的「条件」按钮，清空后保存就是拆掉；或者到阅读视图点「条件」）' : '';
+    };
+    const wrong = (t, e) => new Error(t ? `${STRUCT}第 ${t.n} 行「${t.line}」` + (e ? `，这里应该是「${e.line}」` : /^■\s*(选项|按取消)/.test(t.line) ? '：这一行只能是「■ 选项…」「■ 按取消时」「■ 选项结束」' : '是多出来的（删选项时要把它下面套着的 ■ 行也一起删掉）') + pluginHint(t) + condHint(t) : '带 ■ / # 的结构行不能删除：少了「' + e.line + '」' + condHint(e));
 
     // ---- 原来的选项：每个分支 / 按取消时 / 选项结束属于哪个「显示选项」 ----
     const blockOf = new Map(), blocks = [];
@@ -882,6 +887,77 @@ function createMerger(ctx) {
     const tail = al.regions[al.regions.length - 1].next;
     if (tail && tail.type === 'tail') out.push(...list.slice(tail.start, tail.end + 1));
     return { list: out, unchanged: sameCmds(out, list) };
+  }
+
+  // 文字里少了「■ 如果 …」「■ 条件结束」这几行 = 要拆掉这个条件（和阅读视图「条件」→「拆掉」一个意思）：
+  //   先把原来的指令照这个意思改一遍（「如果」里的内容提上来、缩进 -1，「否则」那段整段删掉），再按原逻辑合并。
+  function dropConditions(list, text, opts = {}) {
+    const al = analyzeList(list, opts);
+    if (!al.editable) return null;
+    const E = al.anchors;
+    if (!E.some(a => a.code === 111)) return null;
+    const T = [];
+    String(text || '').replace(/\r/g, '').split('\n').forEach((raw, n) => {
+      const full = raw.replace(/\s+$/, '');
+      if (stripBar(full).trim().startsWith(ANCHOR)) T.push({ line: full, n });
+    });
+    // 带「│ 」一起比：同名条件的嵌套层级不同，光看字分不清删的是哪一层
+    const expect = a => BAR.repeat(Math.max(0, (a.indent || 0) - al.base)) + a.line.trim();
+    const hit = new Map(lcs(E.map(a => ({ text: expect(a) })), T.map(t => ({ text: t.line }))));
+    const killLines = new Set();
+    const dels = [];
+    for (let k = 0; k < E.length; k++) {
+      const a = E[k];
+      if (a.code !== 111) continue;
+      let depth = 0, elseAt = -1, endAt = -1;
+      for (let i = (a.head || 0) + 1; i < list.length; i++) {
+        const x = list[i];
+        if (!x) continue;
+        if (x.code === 111) depth++;
+        else if (x.code === 412) { if (depth === 0) { endAt = i; break; } depth--; }
+        else if (x.code === 411 && depth === 0 && elseAt < 0) elseAt = i;
+      }
+      if (endAt < 0) continue;
+      const kEnd = E.findIndex(x => x.code === 412 && (x.head || 0) === endAt);
+      const kElse = elseAt > 0 ? E.findIndex(x => x.code === 411 && (x.head || 0) === elseAt) : -1;
+      // 这三行里少任何一行，就当整个条件被删掉了；留着的那几行也从文字里去掉，免得对不上
+      if (hit.has(k) && (kElse < 0 || hit.has(kElse)) && kEnd >= 0 && hit.has(kEnd)) continue;
+      dels.push({ head: a.head, end: endAt, elseAt });
+      for (const idx of [k, kElse, kEnd]) if (idx >= 0 && hit.has(idx)) killLines.add(T[hit.get(idx)].n);
+      // 「否则」那段文字也拿掉（和「拆掉」按钮一样：不成立时的那段整个不要）
+      if (kElse >= 0 && hit.has(kElse) && kEnd >= 0 && hit.has(kEnd)) {
+        for (let n = T[hit.get(kElse)].n + 1; n < T[hit.get(kEnd)].n; n++) killLines.add(n);
+      }
+    }
+    if (!dels.length) return null;
+    const next = list.map(c => ({ ...c }));
+    for (const d of dels.sort((x, y) => y.head - x.head)) {
+      const ind = next[d.head].indent || 0;
+      const bodyEnd = d.elseAt > 0 ? d.elseAt : d.end;
+      const body = next.slice(d.head + 1, bodyEnd);
+      while (body.length && body[body.length - 1].code === 0) body.pop();
+      for (const x of body) if ((x.indent || 0) > ind) x.indent -= 1;
+      next.splice(d.head, d.end - d.head + 1, ...body);
+    }
+    const kept = String(text || '').replace(/\r/g, '').split('\n').filter((_, n) => !killLines.has(n));
+    return { list: next, text: kept.join('\n'), removed: dels.length };
+  }
+
+  // 整页合并：先按原逻辑来。只有「编辑框里把整个条件块删掉了」这一种情况，才按「拆掉这个条件」重新合并一次；
+  // 缺的是别的结构行、或者文字别处有错，照旧报错。
+  function mergeList(list, text, opts = {}) {
+    try { return _mergeList(list, text, opts); }
+    catch (e) {
+      let fixed = null;
+      try { fixed = dropConditions(list, text, opts); } catch { fixed = null; }
+      if (!fixed) throw e;
+      let r;
+      try { r = _mergeList(fixed.list, fixed.text, { ...opts, analysis: undefined }); } catch { throw e; }
+      // 拆条件本身就是改动，要和最原来的指令比，不能拿拆完的那份当基准
+      r.unchanged = sameCmds(r.list, list);
+      r.droppedConditions = fixed.removed;
+      return r;
+    }
   }
 
   return { analyze, merge, analyzeList, mergeList };

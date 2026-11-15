@@ -249,6 +249,67 @@ async function scenePicker() {
   return (await chooseDialog('插入场景：播哪个公共事件（场景库里的排前面）', names)) || null;
 }
 
+// 气泡：选形状 + 冒在谁头上。
+//   主角 / 本事件 → 原生的「显示气泡」(213)；别人头上 → 移动路线里的气泡步骤（#动作 名字 气泡 ♥）
+const BALLOON_SHAPES = ['！', '？', '♪', '♥', '怒', '汗', '乱', '…', '灯', 'Zzz'];
+function balloonTextFor(who, sym) {
+  if (who === '主角') return '#气泡 ' + sym;
+  if (who === '本事件') return '#气泡 ' + sym + ' 本事件';
+  return '#动作 ' + who + ' ' + sym;   // 移动路线里的气泡步骤就是那个符号本身
+}
+async function balloonLine(defaultWho = '本事件') {
+  const actors = await lookup('actor').then(rows => rows.map(a => String(a.name || '').trim()).filter(Boolean)).catch(() => []);
+  const whos = ['本事件', '主角', ...actors.slice(0, 10)];
+  let who = whos.includes(defaultWho) ? defaultWho : '本事件';
+  return openDialog(`<header><h3>冒个气泡</h3><button class="quiet small" data-x>关闭</button></header>
+    <div class="dbody">
+      <div class="csec"><span class="csec-t">冒在谁头上</span><span class="faint">本事件 = 正在跑的这一页；别的人物走移动路线（要先有演出插件，编辑器会自动装）</span></div>
+      <div class="balwho">${whos.map(w => `<button type="button" class="small${w === who ? ' on' : ''}" data-bw="${esc(w)}">${esc(w)}</button>`).join('')}</div>
+      <div class="csec"><span class="csec-t">哪个气泡</span><span class="faint">点一下就插到光标处（RPG Maker 自带 Balloon.png 的第 1~10 行）</span></div>
+      <div class="balgrid">${BALLOON_SHAPES.map(s => `<button type="button" data-bs="${esc(s)}" title="插入「${esc(s)}」">${esc(s)}</button>`).join('')}</div>
+      <div class="fnote" id="bprev"></div>
+    </div>
+    <footer><span class="sp"></span><button data-x>取消</button></footer>`,
+    (d, done) => {
+      const prev = $('#bprev', d);
+      const show = () => { prev.textContent = '会插入：' + balloonTextFor(who, '♥'); };
+      show();
+      $$('[data-bw]', d).forEach(b => b.onclick = () => {
+        who = b.dataset.bw;
+        $$('[data-bw]', d).forEach(x => x.classList.toggle('on', x === b));
+        show();
+      });
+      $$('[data-bs]', d).forEach(b => b.onclick = () => done(balloonTextFor(who, b.dataset.bs)));
+      $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
+    }).then(v => v || null);
+}
+
+// 事件标识：这一页生效时，游戏里事件头顶一直显示（气泡符号 → 每隔 2.5 秒冒一次；别的短文字 → 常驻小字）
+//   存在页最前面的注释里（core/marks.js），RPG Maker 编辑器改地图不会丢
+async function markDialog(cur = '') {
+  const presets = ['！', '？', '♪', '♥', '怒', '汗', '乱', '…', '灯', 'Zzz'];
+  return openDialog(`<header><h3>事件标识</h3><button class="quiet small" data-x>关闭</button></header>
+    <div class="dbody">
+      <div class="csec"><span class="csec-t">这一页生效时，事件头顶一直显示</span><span class="faint">编辑器地图上也会标出来</span></div>
+      <div class="balgrid">${presets.map(s => `<button type="button" data-mk="${esc(s)}"${s === cur ? ' class="on"' : ''}>${esc(s)}</button>`).join('')}</div>
+      <div class="cnew"><input id="mkText" maxlength="6" placeholder="也可以写短文字：ev、序章…" value="${esc(presets.includes(cur) ? '' : cur)}"><button type="button" class="small primary" id="mkOk">用这个</button></div>
+      <label class="switch"><input type="checkbox" id="mkAll" checked><span>这个事件的所有页都用（同一事件的不同页是互斥的，选中就每一页都写）</span></label>
+      <div class="fnote">气泡符号 = 每隔 2.5 秒冒一次气泡；文字 = 一直挂在头顶。</div>
+    </div>
+    <footer><span class="sp"></span><button id="mkNone">不要标识</button><button data-x>取消</button></footer>`,
+    (d, done) => {
+      const allBox = $('#mkAll', d);
+      const out = mark => ({ mark, all: !!(allBox && allBox.checked) });
+      $$('[data-mk]', d).forEach(b => b.onclick = () => done(out(b.dataset.mk)));
+      $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
+      $('#mkNone', d).onclick = () => done(out(''));
+      const inp = $('#mkText', d);
+      const ok = () => { const v = inp.value.trim(); if (v) done(out(v)); else inp.focus(); };
+      $('#mkOk', d).onclick = ok;
+      inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+    }).then(v => (v === undefined ? null : v));
+}
+
 // 谁：主角 / 本事件 /（飘字还有画面）/ 人物 / 手动输入
 async function whoDialog(title, extra = []) {
   const actors = await lookup('actor').then(rows => rows.map(a => a.name).filter(Boolean)).catch(() => []);

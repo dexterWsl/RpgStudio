@@ -234,8 +234,14 @@ function mountBlocks(host, ed) {
         const condRow = has && open ? `<div class="bk-condbox"><span>${nd ? [nd.hide ? `满足 <b>${esc(nd.hide)}</b> 才显示` : '', nd.lock ? `满足 <b>${esc(nd.lock)}</b> 才能选（不然是灰的）` : ''].filter(Boolean).join('<br>') : '<span class="dim">正在读条件…</span>'}</span><button type="button" class="small" data-act="condedit">改条件</button></div>` : '';
         return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-choice">选项 ${r.n || ''}</span><div class="bk-text bk-label" contenteditable="plaintext-only" spellcheck="false" data-edit="label" data-ph="选项的字">${esc(l.text)}</div>${has ? `<button type="button" class="cond-pill${open ? ' open' : ''}" data-act="cond" title="${open ? '收起条件' : '看这个选项的条件'}">条件</button>` : '<button type="button" class="cond-pill add" data-act="condedit" title="要满足条件才能选 / 才显示">＋条件</button>'}<span class="bk-tools"><button type="button" data-act="delopt" title="删掉这个选项（连同它下面的内容）">删掉这个选项</button></span>${condRow}</div>`;
       }
-      case 'if':
-        return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-if">如果</span><span class="bk-static">${esc(s.replace(/^■\s*如果\s*/, ''))}</span><span class="bk-note">（原来的条件，这里不能改；保存后在阅读视图里点「条件」改）</span></div>`;
+      case 'if': {
+        // 「■ 如果」是原来的结构行：删不掉，但能改条件 / 整个拆掉（拆掉 = 里面的内容提上来，「否则」那段删掉）
+        const nth = rows.slice(0, r.i).filter(x => x.kind === 'if').length;
+        const cmdLine = ed.condLines && ed.at ? ed.condLines()[nth] : null;
+        const src = s.replace(/^■\s*如果\s*/, '');
+        const cbtn = cmdLine == null ? '' : `<button type="button" class="cndbtn" data-ifline="${cmdLine}" data-iftext="${esc(src)}" data-iat="${esc(JSON.stringify(ed.at))}" title="改这个条件；留空 = 拆掉这个条件（里面的内容提上来）">条件</button>`;
+        return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-if">如果</span><span class="bk-static">${esc(src)}</span>${cbtn}<span class="bk-note">（点「条件」改；留空保存 = 拆掉）</span></div>`;
+      }
       case 'else': return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-if">否则</span></div>`;
       case 'cancel': return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-choice">按取消时</span></div>`;
       case 'loop': return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag">循环</span></div>`;

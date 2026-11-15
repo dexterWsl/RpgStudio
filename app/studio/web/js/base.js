@@ -123,6 +123,52 @@ function chooseDialog(title, names) {
     }).then(v => v || null);
 }
 
+// 选变量 / 开关：列表里没有合适的就当场新建一个（和「出现条件」里的新建走同一个接口）
+async function pickNameOrCreate(title, kind) {
+  const label = kind === 'var' ? '变量' : '开关';
+  let names;
+  try { names = (await lookup(kind)).filter(r => r.name).map(r => r.name); } catch (e) { toast(e.message, true); return null; }
+  return openDialog(`<header><h3>${esc(title)}</h3><button class="quiet small" data-x>关闭</button></header>
+    <div class="dbody">
+      <input id="pq" placeholder="筛选（共 ${names.length} 个）">
+      <div id="pl" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:46vh;overflow:auto"></div>
+      <div class="cnew"><button type="button" class="small quiet" id="pcNew">＋ 新建${label}</button></div>
+      <div id="pcForm" hidden>
+        <div class="fgrid"><label for="pcName">名字</label><input id="pcName" maxlength="40" placeholder="比如：${kind === 'var' ? '好感度' : '见过长老'}"><button type="button" class="small primary" id="pcOk">新建</button></div>
+        <div class="fnote">直接写进游戏的数据（System.json），用第一个空着的编号；建好就插到光标处。</div>
+        <div id="pcErr"></div>
+      </div>
+    </div>
+    <footer><span class="sp"></span><button data-x>取消</button></footer>`,
+    (d, done) => {
+      const input = $('#pq', d), list = $('#pl', d);
+      const draw = q => {
+        const hit = names.filter(n => !q || n.toLowerCase().includes(q)).slice(0, 240);
+        list.innerHTML = hit.map(n => `<button data-n="${esc(n)}" style="text-align:left;white-space:normal;overflow-wrap:anywhere">${esc(n)}</button>`).join('') || '<div class="dim">没有符合的，点下面「新建」</div>';
+        $$('[data-n]', list).forEach(b => b.onclick = () => done(b.dataset.n));
+      };
+      const submit = async () => {
+        const nm = $('#pcName', d).value.trim();
+        if (!nm) { $('#pcName', d).focus(); return; }
+        try {
+          const x = await api('name', { kind, id: 'new', name: nm });
+          S.lookups = {};
+          done(x && x.name ? x.name : nm);
+        } catch (e) { $('#pcErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+      };
+      input.oninput = e => draw(e.target.value.trim().toLowerCase());
+      $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
+      $('#pcNew', d).onclick = () => {
+        const form = $('#pcForm', d), inp = $('#pcName', d);
+        form.hidden = false;
+        if (!inp.value) inp.value = input.value.trim();
+        inp.focus();
+      };
+      $('#pcOk', d).onclick = submit;
+      $('#pcName', d).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+      draw(''); input.focus();
+    }).then(v => v || null);
+}
 async function lookup(kind) {
   if (!S.lookups[kind]) S.lookups[kind] = api('lookup?kind=' + kind).then(r => r.rows);
   return S.lookups[kind];

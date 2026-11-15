@@ -34,6 +34,7 @@ async function viewEvent(main, mapId, evId, pageIndex) {
       <span class="sp"></span>
       <button type="button" class="linkbtn" id="condToggle" aria-expanded="false">细节</button>
       <button class="small" id="editCond">改条件</button>
+      <button class="small" id="editMark" title="这一页生效时，事件头顶一直显示这个标记（游戏里也看得到）">标识${pg.mark ? '：' + esc(pg.mark) : ''}</button>
       <div class="wmore" id="condMore" hidden>
         ${conds.length > 1 ? `<div class="wrow"><span class="wk">条件</span><div class="v">${conds.map(t => `<span class="cchip">${linkify(t)}</span>`).join('<span class="faint">并且</span>')}</div></div>` : ''}
         <div class="wrow"><span class="wk">优先级</span><span>${esc(pg.priorityText)}</span></div>
@@ -71,6 +72,17 @@ async function viewEvent(main, mapId, evId, pageIndex) {
     pageAction('page/delete', { map: mapId, ev: evId, page: pageIndex }, () => `#/event/${mapId}/${evId}/${Math.max(0, pageIndex - 1)}`, '已删除');
   };
   $('#editCond').onclick = () => conditionDialog(mapId, evId, pageIndex, pg, ev.people || []);
+  $('#editMark').onclick = async () => {
+    const r = await markDialog(pg.mark || '');
+    if (!r) return;
+    const v = r.mark;
+    try {
+      await api('mark/set', { at: { type: 'map', map: mapId, ev: evId, page: pageIndex }, mark: v, all: r.all });
+      toast(v ? '标识：' + v + (r.all ? '（所有页）' : '') : '已去掉标识');
+      await refreshMaps();
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
   // 顶栏选了进度：标出那时显示的是哪一页
   if (S.stage && ev.stages) api('progress/map?id=' + mapId).then(c => {
     const cell = stageCellOf(c, evId);
@@ -181,6 +193,7 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-ifline]');
   if (!b) return;
   e.preventDefault(); e.stopPropagation();
+  if (S.dirty) { toast('先保存，再改条件（不然刚改的台词会丢）', true); return; }
   const at = JSON.parse(b.dataset.iat);
   const line = Number(b.dataset.ifline);
   const txt = b.dataset.iftext || '';
@@ -318,6 +331,7 @@ function editBox(box, pg, at) {
           ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">扮演</button>' : ''}
           <button class="small" id="insFloat" title="字从人物头上飘起来">飘字</button>
           <button class="small" id="insAct" title="人物走几步、转身、冒气泡（移动路线）">动作</button>
+          <button class="small" id="insBalloon" title="人物头上冒气泡：！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz">气泡</button>
           <button class="small quiet" id="blkUndo" title="撤销（Ctrl+Z）">撤销</button>
         </div>
       </div>
@@ -445,7 +459,7 @@ function editBox(box, pg, at) {
     wrap.hidden = m === 'blocks';
     plainNote.hidden = m === 'blocks' || !wrap.classList.contains('plain');
     if (m === 'blocks') {
-      if (!blocks) blocks = mountBlocks(blocksHost, { get: () => ta.value, set: v => { ta.value = v; dirty(); }, scene: inScene, mapId: at && at.type === 'map' ? at.map : 0, nameBox: !!P.nameBox, hintEl: $('#edHint', box) });
+      if (!blocks) blocks = mountBlocks(blocksHost, { get: () => ta.value, set: v => { ta.value = v; dirty(); }, scene: inScene, mapId: at && at.type === 'map' ? at.map : 0, nameBox: !!P.nameBox, hintEl: $('#edHint', box), at, condLines: () => (pg.outline || []).filter(x => x.code === 111).map(x => x.i) });
       else blocks.reload();
     } else {
       if (blocks) { blocks.destroy(); }
@@ -502,8 +516,8 @@ function editBox(box, pg, at) {
   $('#insChoice', box).onclick = async () => { const t = await choiceBuilder(); if (t) insert(t); };
   $('#insIf', box).onclick = async () => { const c = await ifBuilder(); if (c) insert('#如果 ' + c + '\n#结束'); };
   $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
-  $('#insVar', box).onclick = async () => { const n = await pickDialog('插入变量', 'lookup?kind=var'); if (n) insert('#变量 ' + n + ' + 1'); };
-  $('#insSwitch', box).onclick = async () => { const n = await pickDialog('插入开关', 'lookup?kind=switch'); if (n) insert('#开关 ' + n + ' 开'); };
+  $('#insVar', box).onclick = async () => { const n = await pickNameOrCreate('插入变量', 'var'); if (n) insert('#变量 ' + n + ' + 1'); };
+  $('#insSwitch', box).onclick = async () => { const n = await pickNameOrCreate('插入开关', 'switch'); if (n) insert('#开关 ' + n + ' 开'); };
   $('#insScene', box).onclick = async () => {
     const n = await scenePicker();
     if (n) insert('#场景 ' + n);
@@ -512,6 +526,7 @@ function editBox(box, pg, at) {
   if (inScene) $('#insAs', box).onclick = async () => { const l = await asDialog(); if (l) insert(l); };
   $('#insFloat', box).onclick = async () => { const who = await whoDialog('飘字：字从谁头上冒出来', ['画面']); if (who) insert('#飘字 ' + who + '：'); };
   $('#insAct', box).onclick = async () => { const who = await whoDialog('动作 / 移动路线：谁动'); if (who) insert('#动作 ' + who + ' '); };
+  $('#insBalloon', box).onclick = async () => { const l = await balloonLine('本事件'); if (l) insert(l); };
   setMode(mode);
 }
 

@@ -5,6 +5,7 @@
 const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js');
 const { TRIGGERS, PRIORITIES, CE_TRIGGERS } = require('../core/commands.js');
 const choicecond = require('../core/choicecond.js');
+const marks = require('../core/marks.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -15,6 +16,7 @@ module.exports = function (ctx) {
       ...extra,
       outline: T.describer.outline(list),
       script: { editable: al.editable, reason: al.reason || '', text: al.text },
+      mark: marks.get(list),
       commands: list.length,
     };
   }
@@ -81,7 +83,13 @@ module.exports = function (ctx) {
       const v = T.validator.newProblems(list, merged.list);
       if (v.fresh.length) throw new UserError('保存后会出现新的问题，没有保存：' + problemText(v.fresh), { problems: v.fresh });
       holder.list = merged.list;
-      return { unchanged: false, warnings: v.warnings.map(w => w.msg) };
+      return {
+        unchanged: false,
+        warnings: [
+          ...(merged.droppedConditions ? ['已拆掉 ' + merged.droppedConditions + ' 个条件：「如果」里的内容提上来了，「否则」那段删掉了'] : []),
+          ...v.warnings.map(w => w.msg),
+        ],
+      };
     });
     return { ...r.result, changed: r.changed, view: at.type === 'map' ? eventView(T, at.map, at.ev) : ceView(T, at.ce) };
   }
@@ -198,7 +206,13 @@ module.exports = function (ctx) {
         try { merged = T.merger.mergeList(list, String(b.text || ''), { baseIndent: 0 }); }
         catch (e) { throw new UserError(e.message); }
         const v = T.validator.newProblems(list, merged.list);
-        return { ok: true, unchanged: merged.unchanged, outline: T.describer.outline(merged.list), problems: v.fresh, warnings: v.warnings.map(w => w.msg) };
+        return {
+          ok: true, unchanged: merged.unchanged, outline: T.describer.outline(merged.list), problems: v.fresh,
+          warnings: [
+            ...(merged.droppedConditions ? ['保存后会拆掉 ' + merged.droppedConditions + ' 个条件：「如果」里的内容提上来，「否则」那段删掉'] : []),
+            ...v.warnings.map(w => w.msg),
+          ],
+        };
       },
     // 选项条件：{ at, line, lockNeed, hideNeed } = 要满足什么才能选 / 才显示（空 = 不设）
     //   存成选项文字里的标记（取反：<<[…]>> 是「什么时候锁住」），改这一条「选了…」和「显示选项」里对应的那一项（游戏里显示的是那一份）
@@ -227,6 +241,21 @@ module.exports = function (ctx) {
             if (Array.isArray(arr) && Number.isInteger(idx) && idx >= 0 && arr[idx] != null) arr[idx] = label;
             break;
           }
+        }
+      });
+      return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
+    },
+    // 事件标识：这一页生效时，游戏里事件头顶一直有这个标记（演出插件画），编辑器地图上也显示
+    'mark/set'(T, b) {
+      const at = target(b);
+      const text = String(b.mark == null ? '' : b.mark).trim();
+      const all = !!b.all;
+      T.store.edit([fileOf(at)], docs => {
+        const { holder } = locate(docs, at);
+        marks.set(holder.list || [], text);
+        if (all && at.type === 'map') {
+          const ev = (((docs[project.mapFile(at.map)] || {}).events) || [])[at.ev];
+          for (const pg of (ev && ev.pages) || []) if (pg && pg !== holder) marks.set(pg.list || [], text);
         }
       });
       return at.type === 'map' ? { view: eventView(T, at.map, at.ev) } : { view: ceView(T, at.ce) };
