@@ -310,7 +310,25 @@ module.exports = function (ctx) {
         let id = m.events.findIndex((e, i) => i > 0 && !e);
         if (id < 0) id = Math.max(1, m.events.length);
         const name = String(b.name || '').trim().slice(0, 40) || 'EV' + String(id).padStart(3, '0');
-        m.events[id] = { id, name, note: '', pages: [blankPage()], x, y };
+        const page = blankPage();
+        if (b.image) page.image = checkImage(b.image, page.image);
+        applyMove(page, b);
+        if (b.attackName) {
+          const attack = checkImage({ characterName: b.attackName }, null);
+          need(page.image.characterName && attack.characterName, 'NPC 需要有效的行走图和攻击图');
+          const script = line => ({ code: 45, parameters: [line] });
+          const wait = { code: 15, parameters: [6] };
+          // 强制移动路线会暂停 NPC 的自主移动，结束后恢复原图和走路动画。
+          const list = [
+            script('this._studioAttackPose = [this.characterName(), this.characterIndex(), this.pattern(), this.hasWalkAnime(), this.hasStepAnime()]; this.setWalkAnime(false); this.setStepAnime(false); this.setImage(' + JSON.stringify(attack.characterName) + ', ' + attack.characterIndex + '); this.setPattern(0); this._animationCount = 0;'),
+            wait,
+            ...[1, 2].flatMap(pattern => [script('this.setPattern(' + pattern + '); this._animationCount = 0;'), wait]),
+            script('var old = this._studioAttackPose; if (old) { this.setImage(old[0], old[1]); this.setPattern(old[2]); this.setWalkAnime(old[3]); this.setStepAnime(old[4]); this._animationCount = 0; delete this._studioAttackPose; }'),
+            END(),
+          ];
+          page.list = [{ code: 205, indent: 0, parameters: [0, { list, repeat: false, skippable: true, wait: true }] }, END()];
+        }
+        m.events[id] = { id, name, note: '', pages: [page], x, y };
         return id;
       });
       return { id: r.result, view: eventView(tools(), mapId, r.result) };

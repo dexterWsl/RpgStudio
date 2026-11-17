@@ -39,6 +39,7 @@ function detectEngine(gameDir, sys) {
 
 // 加密图片：16 字节假文件头 + 数据（前 16 字节和 System.encryptionKey 异或）
 const FAKE_HEADER = Buffer.from([0x52, 0x50, 0x47, 0x4d, 0x56, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0]);
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const IMG_EXT = ['.png', '.png_', '.rpgmvp', '.jpg', '.jpeg', '.webp'];
 
 function createProject(opts) {
@@ -177,7 +178,7 @@ function createProject(opts) {
     sub = safeSub(sub);
     const rel = String(nm || '');
     if (!sub || !/^[!$]*[\w\u4e00-\u9fff][\w\u4e00-\u9fff .()\-]{0,59}$/.test(rel)) throw new Error('文件名不合法：' + rel + '（字母、数字、中文、下划线，开头可以有 ! 或 $）');
-    if (!Buffer.isBuffer(png) || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('只支持 PNG 图片');
+    if (!Buffer.isBuffer(png) || !png.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('只支持 PNG 图片');
     const root = o.root || gameImgRoot();
     const dir = path.join(root, sub);
     fs.mkdirSync(dir, { recursive: true });
@@ -199,9 +200,14 @@ function createProject(opts) {
     }
     const dest = path.join(dir, rel + ext);
     const tmp = dest + '.tmp-' + process.pid;
-    fs.writeFileSync(tmp, buf);
-    // 先把新文件放好再删旧的：反过来一旦 rename 失败，新图只剩 .tmp、旧图已经没了
-    fs.renameSync(tmp, dest);
+    try {
+      fs.writeFileSync(tmp, buf);
+      // 先把新文件放好再删旧的，写入失败时保留旧图。
+      fs.renameSync(tmp, dest);
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch { }
+      throw e;
+    }
     for (const f of others) if (f !== dest) { try { fs.unlinkSync(f); } catch { } }
     imgCache.clear();
     return { file: dest, encrypted: encrypt };
@@ -300,11 +306,26 @@ function createProject(opts) {
     imgCache.set(key, out);
     return out;
   }
-  // 图片尺寸（只认 PNG，读不出来返回 null）：立绘要按图的高度贴着画面下沿放
+  // 只读 PNG 的文件头，统计素材尺寸时不用把整个图集读入内存。
   function imageSize(sub, nm) {
-    const im = loadImage(sub, nm);
-    if (!im || im.mime !== 'image/png' || im.buf.length < 24) return null;
-    return { w: im.buf.readUInt32BE(16), h: im.buf.readUInt32BE(20) };
+    const f = findImage(sub, nm);
+    if (!f) return null;
+    const head = Buffer.alloc(40);
+    let fd;
+    try {
+      fd = fs.openSync(f, 'r');
+      const bytes = fs.readSync(fd, head, 0, head.length, 0);
+      const offset = head.subarray(0, 16).equals(FAKE_HEADER) ? 16 : 0;
+      if (bytes < offset + 24) return null;
+      if (offset) {
+        const key = Buffer.from(String(sys().encryptionKey || ''), 'hex');
+        if (key.length !== 16) return null;
+        for (let i = 0; i < 16; i++) head[offset + i] ^= key[i];
+      }
+      if (!head.subarray(offset, offset + 8).equals(PNG_SIGNATURE) || head.toString('ascii', offset + 12, offset + 16) !== 'IHDR') return null;
+      return { w: head.readUInt32BE(offset + 16), h: head.readUInt32BE(offset + 20) };
+    } catch { return null; }
+    finally { if (fd !== undefined) fs.closeSync(fd); }
   }
   const listCache = new Map();
   function listImages(sub) {

@@ -2,6 +2,7 @@
 // 小人库：行走图 / 头像库、上传、替换一格、调整（偏移 / 缩放 / 翻转）
 // ---------- 小人库 ----------
 async function viewSprites(main, sub) {
+  if (sub === 'doll') { closeSide(); return viewPaperDoll(main); }
   sub = sub === 'faces' ? 'faces' : 'characters';
   main.innerHTML = '<div class="loading">正在读取小人…</div>';
   const r = await api('sheets?sub=' + sub);
@@ -11,7 +12,8 @@ async function viewSprites(main, sub) {
     <div class="titlebar"><h1>小人库</h1>
       <div class="seg"><button data-sub="characters" class="${sub === 'characters' ? 'on' : ''}">行走图</button><button data-sub="faces" class="${sub === 'faces' ? 'on' : ''}">头像</button></div>
       <span class="dim">${r.sheets.length} 张图</span><span class="sp"></span>
-      ${r.canWrite && sub === 'characters' ? '<button class="small" id="upThree" title="正面、侧面、背面三张站立图（或者一张三视图），拼成游戏里能走的小人">从三视图做</button>' : ''}
+      ${r.canWrite && sub === 'characters' ? '<a class="tag" href="#/sprites/doll">纸娃娃制作</a>' : ''}
+      ${r.canWrite && sub === 'characters' ? '<button class="small" id="upFour">从四视图做</button>' : ''}
       ${r.canWrite ? `<button class="primary small" id="upNew">上传${sub === 'faces' ? '头像' : '小人'}</button>` : ''}</div>
     <div class="filters"><input type="search" id="sq" placeholder="按图名筛选"><div class="seg" id="sf"><button data-f="all" class="on">全部</button><button data-f="used">用到的</button><button data-f="unused">没用到的</button></div>
       <span class="dim" style="font-size:12.5px">点一个${sub === 'faces' ? '头像' : '小人'}看它用在哪里、替换或调整</span></div>
@@ -31,7 +33,7 @@ async function viewSprites(main, sub) {
   $('#sq').oninput = e => { q = e.target.value.trim().toLowerCase(); draw(); };
   $$('#sf button').forEach(b => b.onclick = () => { filter = b.dataset.f; $$('#sf button').forEach(x => x.classList.toggle('on', x === b)); draw(); });
   if ($('#upNew')) $('#upNew').onclick = () => uploadDialog(sub, null);
-  if ($('#upThree')) $('#upThree').onclick = () => threeViewDialog();
+  if ($('#upFour')) $('#upFour').onclick = fourViewDialog;
   draw();
 }
 // 右栏：一个小人用在哪里 + 替换 / 调整
@@ -65,6 +67,23 @@ const loadFileImage = file => new Promise((res, rej) => {
   fr.readAsDataURL(file);
 });
 const canvasPng = cv => cv.toDataURL('image/png');
+function showSpriteGuide(box, guide, previewSample) {
+  const { recommended: r, sizes, tileSize } = guide;
+  const sample = r.sample;
+  box.innerHTML = `<div class="sprguide">
+    ${sample ? '<div class="sprguide-sprite" aria-hidden="true"></div>' : ''}
+    <div><strong>推荐单帧 ${r.width} × ${r.height} px</strong>
+      <div class="dim">${r.uses ? `工程里引用最多，共 ${r.uses} 处` : r.sheets ? `工程里最常见，共 ${r.sheets} 张` : '按本工程地图格计算'} · 地图每格 ${tileSize} px</div>
+      <div class="faint">单人整图 ${r.width * 3} × ${r.height * 4} px · 8 人整图 ${r.width * 12} × ${r.height * 8} px</div>
+      ${sizes.length > 1 ? `<div class="faint">其他常用单帧 ${sizes.slice(1).map(s => s.width + ' × ' + s.height).join('、')} px</div>` : ''}
+    </div>
+    ${sample ? `<div class="sprguide-file"><span class="dim">${esc(sample.name)}${sample.big ? '' : ' · 第 ' + (sample.index + 1) + ' 位'}</span>
+      ${previewSample ? '<button type="button" class="small" data-guide-sample aria-haspopup="dialog">查看游戏样图</button>'
+        : `<a class="tag" href="${esc(img('characters', sample.name))}" download="${esc(sample.name.split('/').at(-1))}.png">下载游戏示例</a>`}</div>` : ''}
+  </div>`;
+  if (sample) mountSprite($('.sprguide-sprite', box), sample.name, sample.index, 2, 50, true, 'characters');
+  if (sample && previewSample) $('[data-guide-sample]', box).onclick = () => previewSample(sample);
+}
 // 猜上传的是单人图（3×4 帧）还是 8 人图（12×8 帧）：帧越接近方形越像
 function guessLayout(im) {
   const w = im.naturalWidth, h = im.naturalHeight, opts = [];
@@ -79,6 +98,7 @@ async function uploadDialog(sub, target) {
   const isFace = sub === 'faces';
   const r = await openDialog(`<header><h3>${target ? `替换 ${esc(target.name)}${target.big ? '' : ' 的第 ' + (target.index + 1) + ' 个'}` : isFace ? '上传头像' : '上传小人'}</h3></header>
     <div class="dbody">
+      ${isFace ? '' : '<div id="upGuide">正在读取本工程的推荐尺寸…</div>'}
       <label class="drop" id="drop"><input type="file" accept="image/png" id="upf" hidden><span>把 PNG 拖到这里，或者点这里选文件</span></label>
       <div class="fnote">${isFace ? '头像图：4 列 × 2 行，每格一个头像（RPG Maker 标准是 576×288）；也可以只传一张头像，会放进你选的那一格。' : '行走图：<b>单人图</b> 3 列（姿势）× 4 行（朝向：下、左、右、上），文件名会自动加 $；<b>8 人图</b> 12 列 × 8 行。背景要透明。'}</div>
       <div id="upPrev" class="upprev"></div>
@@ -91,6 +111,9 @@ async function uploadDialog(sub, target) {
     </div>
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok disabled>${target ? '替换并保存' : '上传'}</button></footer>`,
     (d, done) => {
+      const guide = $('#upGuide', d);
+      if (guide) api('sprite-guide').then(info => { if (guide.isConnected) showSpriteGuide(guide, info); })
+        .catch(() => { if (guide.isConnected) guide.textContent = '暂时无法读取本工程的推荐尺寸'; });
       const fail = m => { $('#upErr', d).innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
       const preview = () => {
         const box = $('#upPrev', d);
@@ -267,151 +290,413 @@ async function adjustDialog(name, index) {
   render();
 }
 
-// ---------- 从三视图做小人 ----------
-//   正面 / 右侧 / 背面三张透明站立图（或者一张三视图，左右等分成三份），拼成单人行走图（3 列 × 4 行）：
-//   朝下 = 正面，朝左 = 右侧镜像，朝右 = 右侧，朝上 = 背面；走路的左右两帧整体往上抬几像素（只有站姿也能看出在走）。
-//   脚底对齐：每张图都按「最下面那一排不透明像素的中点」放在格子底部中间，正面的身高缩到设定的像素。
-//   AI 出的三视图（比如 ComfyUI 的「立绘转高清像素小人」）就是这个格式。
-function viewBox(im) {
+// ---------- 从四视图做小人 ----------
+const WALK_VIEWS = [['front', '正面'], ['left', '左侧'], ['right', '右侧'], ['back', '背面']];
+const WALK_VIEW_NAMES = {
+  front: /正面|前面|朝下|front/i,
+  left: /左侧|左面|朝左|left/i,
+  right: /右侧|右面|朝右|right/i,
+  back: /背面|后面|朝上|back/i,
+};
+
+function fitWalkView(im, height, margin) {
   const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
-  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-  const g = cv.getContext('2d'); g.drawImage(im, 0, 0);
-  const a = g.getImageData(0, 0, w, h).data;
+  const source = document.createElement('canvas'); source.width = w; source.height = h;
+  const sg = source.getContext('2d'); sg.drawImage(im, 0, 0);
+  const a = sg.getImageData(0, 0, w, h).data;
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (a[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y; }
-  if (x1 < 0) throw new Error('有一张图是全透明的（背景要透明，人物不透明）');
-  // 脚：最下面 6% 高度里不透明像素的平均 x
-  const band = Math.max(2, Math.round((y1 - y0) * 0.06));
-  let sx = 0, n = 0;
-  for (let y = y1 - band; y <= y1; y++) for (let x = x0; x <= x1; x++) if (a[(y * w + x) * 4 + 3] > 40) { sx += x; n++; }
-  return { cv, x0, y0, x1, y1, fx: n ? sx / n : (x0 + x1) / 2, fy: y1 + 1 };
+  if (x1 < 0) throw new Error('图片全透明，请选择有角色的 PNG');
+  const sourceWidth = x1 - x0 + 1, sourceHeight = y1 - y0 + 1;
+  const width = Math.max(1, Math.round(height * sourceWidth / sourceHeight));
+  const cv = document.createElement('canvas'); cv.width = width + margin * 2; cv.height = height;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = height < sourceHeight;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(source, x0, y0, sourceWidth, sourceHeight, margin, 0, width, height);
+  source.width = source.height = 0;
+  const pixels = g.getImageData(0, 0, cv.width, height).data;
+  return { cv, pixels, ...walkFootprint(pixels, cv.width, height) };
 }
-// 缩小：一半一半地缩，比一次缩到底清楚
-function shrinkCanvas(src, s) {
-  let cur = src, k = s;
-  while (k < 0.5) {
-    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(cur.width / 2)); c.height = Math.max(1, Math.round(cur.height / 2));
-    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(cur, 0, 0, c.width, c.height);
-    cur = c; k *= 2;
+
+function footColumns(pixels, width, start, height) {
+  const columns = new Uint32Array(width);
+  for (let y = start; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (pixels[(y * width + x) * 4 + 3] > 40) columns[x]++;
+    }
   }
-  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(src.width * s)); c.height = Math.max(1, Math.round(src.height * s));
-  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(cur, 0, 0, c.width, c.height);
-  return c;
+  return columns;
 }
-// 走路的三帧：左脚抬起 / 站着 / 右脚抬起（游戏里按 0 1 2 1 轮着放）。跟 lonely/art/dnf_sheets.py 是同一套规则：
-//   正面、背面：腿分左右两半（从两腿之间最空的那一列分开），抬起那条腿从胯往下慢慢收上去，上半身往下沉一点
-//   侧面：两条腿叠在一起的那一竖条复制两份，一份往前迈、一份（暗一点，远的那条腿）往后迈，抬起的那只脚离地一点
-//   腿从哪里开始算：脚底往上 44% 的身高。数值都是游戏里的像素，乘上「迈步幅度」
-const WALK = { leg: 0.44, lift: 3.5, sink: 1, stride: 4, sideLift: 1.5 };
-function legSplit(a, w, b) {
-  const hip = b.fy - WALK.leg * (b.fy - b.y0);
-  const lo = Math.floor(b.fy - (b.fy - hip) * 0.55), bw = b.x1 + 1 - b.x0;
-  const c0 = Math.floor(b.fx - bw * 0.15), c1 = Math.floor(b.fx + bw * 0.15);
-  let best = Infinity, split = b.fx;
-  for (let x = Math.max(0, c0); x <= Math.min(w - 1, c1); x++) {
-    let n = 0;
-    for (let y = lo; y < b.fy; y++) if (a[(y * w + x) * 4 + 3] > 40) n++;
-    if (n < best - 0.5 || (Math.abs(n - best) <= 0.5 && Math.abs(x + 0.5 - b.fx) < Math.abs(split - b.fx))) { best = Math.min(best, n); split = x + 0.5; }
+
+function walkRuns(width, occupied) {
+  const runs = [];
+  for (let x = 0; x < width; x++) {
+    if (!occupied(x)) continue;
+    const left = x;
+    while (x + 1 < width && occupied(x + 1)) x++;
+    runs.push({ left, right: x, center: (left + x) / 2 });
   }
-  return { split, hip };
+  return runs;
 }
-function legBand(a, w, b, hip) {
-  const y0 = Math.floor(b.fy - (b.fy - hip) * 0.12);
-  const on = x => { for (let y = y0; y < b.fy; y++) if (a[(y * w + x) * 4 + 3] > 40) return true; return false; };
-  let x = Math.round(b.fx);
-  if (!on(x)) { let best = null; for (let i = 0; i < w; i++) if (on(i) && (best == null || Math.abs(i - b.fx) < Math.abs(best - b.fx))) best = i; if (best == null) return [x - 4, x + 4]; x = best; }
-  let l = x, r = x;
-  while (l > 0 && on(l - 1)) l--;
-  while (r < w - 1 && on(r + 1)) r++;
-  const m = Math.floor((r - l) * 0.25) + 2;
-  return [l - m, r + m];
+
+function walkFootprint(pixels, width, height) {
+  // 用躯干定位角色，再找靠近躯干的脚底。低垂的武器或衣角可能也接近地面。
+  const torsoTop = Math.floor(height * 0.36), torsoBottom = Math.ceil(height * 0.6);
+  const torso = footColumns(pixels, width, torsoTop, torsoBottom);
+  let middle = torso.reduce((sum, n) => sum + n, 0) / 2;
+  const core = middle ? torso.findIndex(n => (middle -= n) <= 0) : Math.floor(width / 2);
+  const trunk = walkRuns(width, x => torso[x] >= (torsoBottom - torsoTop) * 0.35).find(run => run.left <= core && run.right >= core);
+  const torsoWidth = trunk ? trunk.right - trunk.left + 1 : width;
+  const start = Math.floor(height * 0.84);
+  const columns = footColumns(pixels, width, start, height);
+  const runs = walkRuns(width, x => columns[x] >= Math.max(1, Math.round((height - start) * 0.22)));
+  const weight = run => columns.subarray(run.left, run.right + 1).reduce((sum, n) => sum + n, 0);
+  const score = run => weight(run) / (1 + Math.abs(run.center - core) / (height * 0.1));
+  runs.sort((a, b) => score(b) - score(a));
+  const main = runs[0];
+  if (!main) return { left: core, right: core, center: core, columns, start, torsoWidth };
+  const other = runs.slice(1).find(run => {
+    const gap = Math.max(run.left - main.right, main.left - run.right);
+    return gap <= height * 0.19 && weight(run) >= weight(main) * 0.36;
+  }) || main;
+  const left = Math.min(main.left, other.left), right = Math.max(main.right, other.right);
+  return { left, right, center: (left + right + 1) / 2, columns, start, torsoWidth };
 }
-// 一帧：kind = 'front'（正面 / 背面）或 'side'；side = -1 / 1 是哪条腿抬；k = 原图像素 / 游戏像素
-function stepFrame(b, kind, side, k) {
-  const w = b.cv.width, h = b.cv.height;
-  const a = b.cv.getContext('2d').getImageData(0, 0, w, h).data;
-  const { split, hip } = legSplit(a, w, b);
-  const H0 = Math.floor(hip), L = Math.max(1, b.fy - hip), sink = WALK.sink * k;
-  const t = y => Math.min(1, Math.max(0, (y - hip) / L));
-  const out = new Float32Array(w * h * 4);
-  const put = (i, r, g, bl, al) => {
-    const f = al / 255;
-    out[i] = r * f + out[i] * (1 - f); out[i + 1] = g * f + out[i + 1] * (1 - f); out[i + 2] = bl * f + out[i + 2] * (1 - f);
-    out[i + 3] = Math.max(out[i + 3], al);
-  };
-  // 腿的一部分（cols 选哪些列）按行挪：dy、dx 只跟这一行在腿上的位置有关
-  const warp = (cols, dyOf, dxOf, mul = 1) => {
-    for (let y = H0; y < h; y++) {
-      const ny = Math.round(y + dyOf(y)); if (ny < 0 || ny >= h) continue;
-      const dx = Math.round(dxOf(y));
-      for (let x = 0; x < w; x++) {
-        if (!cols(x)) continue;
-        const i = (y * w + x) * 4, al = a[i + 3];
-        if (!al) continue;
-        const nx = x + dx; if (nx < 0 || nx >= w) continue;
-        put((ny * w + nx) * 4, a[i] * mul, a[i + 1] * mul, a[i + 2] * mul, al);
+
+function walkLegSplit(b, side) {
+  const { width, height } = b.cv;
+  const { left, right, center, start, columns, pixels } = b;
+  const span = right - left + 1;
+  if (span < Math.max(3, height * 0.035)) return null;
+  // 宽裙摆上的暗褶皱不能单独作为两只脚的依据。
+  const useShade = !side && span <= b.torsoWidth * 0.83 + 1;
+  const shades = useShade ? Array.from({ length: span }, (_, i) => {
+    let light = 0, sole = -1;
+    for (let y = start; y < height; y++) {
+      const p = (y * width + left + i) * 4;
+      if (pixels[p + 3] <= 40) continue;
+      light += pixels[p] * 0.21 + pixels[p + 1] * 0.72 + pixels[p + 2] * 0.07;
+      sole = y;
+    }
+    return { luma: light / Math.max(1, columns[left + i]), sole };
+  }) : null;
+  const total = columns.subarray(left, right + 1).reduce((sum, n) => sum + n, 0);
+  const shoulder = Math.max(1, Math.round(span * 0.17));
+  let mass = 0, best = -Infinity, split = null;
+  for (let x = left + 1; x <= right; x++) {
+    mass += columns[x - 1];
+    const balance = Math.abs(2 * mass / total - 1);
+    if (balance > 0.48) continue;
+    const lo = Math.max(left, x - shoulder - 1), hi = Math.min(right, x + shoulder);
+    const filled = Math.min(Math.max(...columns.subarray(lo, x)), Math.max(...columns.subarray(x, hi + 1)));
+    const gap = 1 - Math.min(columns[x - 1], columns[x]) / Math.max(1, filled);
+    let evidence = gap - 0.28;
+    // 侧面只认轮廓缝。正背面鞋子相贴时，两边鞋底错开也能佐证较暗的接缝。
+    if (shades) {
+      const nearLeft = shades[lo - left], nearRight = shades[hi - left];
+      const m = shades[x - left - 1].luma, n = shades[x - left].luma;
+      const flank = Math.min(nearLeft.luma, nearRight.luma);
+      const seam = (4 * Math.min(m, n) + Math.max(m, n)) / 5;
+      const contrast = flank - seam;
+      evidence = Math.max(evidence, (contrast - 23) / 80);
+      if (nearLeft.sole >= 0 && nearRight.sole >= 0 && Math.abs(nearLeft.sole - nearRight.sole) >= Math.max(2, height * 0.02)) {
+        evidence = Math.max(evidence, contrast / Math.max(48, flank) - 0.24);
       }
     }
-  };
-  const drop = y => sink * (1 - t(y));
-  if (kind === 'front') {
-    const lift = WALK.lift * k;
-    for (const part of [-1, 1]) warp(x => (part < 0 ? x < split : x >= split), y => drop(y) - (part === side ? lift * Math.pow(t(y), 1.3) : 0), () => 0);
-  } else {
-    const stride = WALK.stride * k, lift = WALK.sideLift * k;
-    const [l, r] = legBand(a, w, b, hip);
-    const inBand = x => x >= l && x <= r;
-    warp(inBand, y => drop(y) - (side < 0 ? lift * Math.pow(t(y), 1.5) : 0), y => -stride * Math.pow(t(y), 1.1), 0.72);   // 远的那条腿往后、暗一点
-    warp(x => !inBand(x), drop, () => 0);
-    warp(inBand, y => drop(y) - (side > 0 ? lift * Math.pow(t(y), 1.5) : 0), y => stride * Math.pow(t(y), 1.1));
+    if (evidence <= 0) continue;
+    const score = evidence - balance * 0.5 - Math.abs(x - center) / span * 0.2;
+    if (score > best) { best = score; split = x; }
   }
-  // 胯以上整块往下沉一点，盖在腿上面
-  const sh = Math.round(sink);
-  for (let y = 0; y < H0; y++) {
-    const ny = y + sh; if (ny >= h) continue;
-    for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; if (a[i + 3]) put((ny * w + x) * 4, a[i], a[i + 1], a[i + 2], a[i + 3]); }
+  return split;
+}
+
+function traceWalkFoot(b, left, right, min = 0, max = b.cv.width - 1) {
+  const { width, height } = b.cv;
+  const limit = Math.floor(height * 0.48);
+  const reach = Math.max(1, Math.round(height * 0.025));
+  const maxWidth = (right - left + 1) * 1.7 + 2;
+  const mergeWidth = (b.right - b.left + 1) * 1.22 + 2;
+  const bands = new Array(height);
+  let top = height, count = 0, missing = 0;
+  for (let y = height - 1; y >= limit; y--) {
+    const runs = b.runs[y];
+    let best = null, distance = Infinity;
+    for (const run of runs) {
+      const lo = Math.max(run.left, min), hi = Math.min(run.right, max);
+      if (lo > hi || lo > right + reach || hi < left - reach) continue;
+      const shift = Math.abs(lo + hi - left - right);
+      if (shift < distance) { best = { left: lo, right: hi, width: run.right - run.left + 1 }; distance = shift; }
+    }
+    if (!best) {
+      if (++missing > Math.max(2, Math.ceil(height * (count ? 0.025 : 0.09)))) break;
+      continue;
+    }
+    // 追到与更宽的裙摆或躯干合在一起的地方时停止。
+    if (best.right - best.left + 1 > maxWidth || best.width > mergeWidth) break;
+    ({ left, right } = best);
+    bands[y] = best;
+    top = y;
+    count++;
+    missing = 0;
+  }
+  return count >= Math.max(3, Math.round(height * 0.075)) ? { top, bands } : null;
+}
+
+function walkFeet(b, side) {
+  const { width, height } = b.cv;
+  b.runs = Array.from({ length: height }, (_, y) => walkRuns(width, x => b.pixels[(y * width + x) * 4 + 3] > 40));
+  const split = walkLegSplit(b, side);
+  if (split == null) return null;
+  const left = traceWalkFoot(b, b.left, split - 1, 0, split - 1);
+  const right = traceWalkFoot(b, split, b.right, split);
+  if (!left || !right) return null;
+  if (!side) {
+    // 错开的鞋底可能跨过竖直鞋缝。把最底部贴着整只鞋的细边归还给那只鞋。
+    const thin = Math.max(1, Math.round((b.right - b.left + 1) * 0.18));
+    for (let y = height - 1; y >= b.start; y--) {
+      const a = left.bands[y], c = right.bands[y];
+      if (!a || !c) continue;
+      const leftWidth = a.right - a.left + 1, rightWidth = c.right - c.left + 1;
+      const small = Math.min(leftWidth, rightWidth), large = Math.max(leftWidth, rightWidth);
+      if (a.right + 1 !== c.left || small > thin || large < small * 2.5) break;
+      if (leftWidth < rightWidth) { c.left = a.left; delete left.bands[y]; }
+      else { a.right = c.right; delete right.bands[y]; }
+    }
+  }
+  return [left, right];
+}
+
+function walkFaceColors(b) {
+  const { width, height } = b.cv;
+  const radius = Math.round(height * 0.12);
+  const left = Math.max(0, Math.floor(b.center - radius)), right = Math.min(width, Math.ceil(b.center + radius));
+  const hair = new Map(), colors = new Map();
+  const faceTop = Math.floor(height * 0.29);
+  for (let y = Math.floor(height * 0.12); y < height * 0.58; y++) {
+    for (let x = left; x < right; x++) {
+      const i = (y * width + x) * 4;
+      const [r, g, blue, alpha] = b.pixels.subarray(i, i + 4);
+      if (alpha < 160 || Math.max(r, g, blue) < 64 || Math.max(r, g, blue) - Math.min(r, g, blue) < 18) continue;
+      const key = (r >> 4) * 256 + (g >> 4) * 16 + (blue >> 4);
+      if (y < faceTop) hair.set(key, [r, g, blue]);
+      else if (!hair.has(key)) colors.set(key, [r, g, blue]);
+    }
+  }
+  const hairColors = [...hair.values()];
+  const distinct = [...colors.values()].filter(([r, g, blue]) => !hairColors.some(([a, c, d]) =>
+    Math.abs(r - a) + Math.abs(g - c) + Math.abs(blue - d) <= 48));
+  // 从面部附近选最集中的色相，减少眼睛、头发高光和衣服颜色的干扰。
+  const groups = Array.from({ length: 12 }, () => []);
+  for (const color of distinct) {
+    const [r, g, blue] = color;
+    const hue = (Math.round(Math.atan2(g - blue, r - g) * 6 / Math.PI) + 12) % 12;
+    groups[hue].push(color);
+  }
+  const family = groups.map((group, i) => [...groups[(i + 11) % 12], ...group, ...groups[(i + 1) % 12]]);
+  const selected = family.reduce((best, group) => group.length > best.length ? group : best, []);
+  const light = ([r, g, blue]) => r + g + blue;
+  return selected.sort((a, b) => light(a) - light(b));
+}
+
+function walkHands(b, feet, view, colors) {
+  const { width, height } = b.cv;
+  const side = view === 'left' || view === 'right', facing = view === 'left' ? -1 : 1;
+  // 侧面只用中亮部，避免手的深色描边和腿、衣摆连在一起。
+  const palette = side ? colors.slice(Math.floor(colors.length * 0.45)) : colors;
+  const hip = Math.min(...feet.map(foot => foot.top));
+  const first = Math.max(Math.floor(height * 0.34), Math.floor(hip - height * 0.22));
+  const last = hip - 1;
+  const match = new Uint8Array(width * height);
+  const colorCache = new Map();
+  for (let y = first; y < last; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = x - b.center, distance = Math.abs(offset);
+      if (side ? distance > height * 0.18 || offset * facing > height * 0.045
+        : distance < height * 0.095 || distance > height * 0.34) continue;
+      const i = (y * width + x) * 4;
+      if (b.pixels[i + 3] < 100) continue;
+      const [r, g, blue] = b.pixels.subarray(i, i + 3);
+      if (Math.max(r, g, blue) - Math.min(r, g, blue) < 14) continue;
+      const key = r * 65536 + g * 256 + blue;
+      if (!colorCache.has(key)) {
+        colorCache.set(key, palette.some(([a, c, d]) => Math.abs(r - a) + Math.abs(g - c) + Math.abs(blue - d) <= 39));
+      }
+      match[y * width + x] = Number(colorCache.get(key));
+    }
+  }
+
+  const hands = [];
+  for (let seed = first * width; seed < last * width; seed++) {
+    if (!match[seed]) continue;
+    const queue = [seed], bands = new Array(height);
+    let top = last, bottom = first, left = width, right = 0;
+    match[seed] = 0;
+    for (let j = 0; j < queue.length; j++) {
+      const i = queue[j], x = i % width, y = Math.floor(i / width);
+      const row = bands[y] || (bands[y] = { left: x, right: x });
+      row.left = Math.min(row.left, x); row.right = Math.max(row.right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
+      left = Math.min(left, x); right = Math.max(right, x);
+      for (const next of [x > 0 ? i - 1 : -1, x + 1 < width ? i + 1 : -1, i - width, i + width]) {
+        if (match[next]) { match[next] = 0; queue.push(next); }
+      }
+    }
+    const handWidth = right - left + 1, handHeight = bottom - top + 1;
+    if (top <= first || bottom >= last - 1 || handWidth < height * 0.035 || handHeight < height * 0.035 ||
+        Math.max(handWidth, handHeight) > height * 0.145 || queue.length < handWidth * handHeight * 0.46 ||
+        Math.max(handWidth, handHeight) > Math.min(handWidth, handHeight) * 2) continue;
+    const onLeft = (left + right) / 2 < b.center;
+    // 正背面只收紧贴人体外轮廓的手，避免把衣服上的同色纹样当成手。
+    const edge = onLeft ? 'left' : 'right', sign = onLeft ? -1 : 1;
+    if (!side && !bands.some((row, y) => b.runs[y].some(run =>
+      row.left >= run.left && row.right <= run.right && Math.abs(row[edge] - run[edge]) <= height * 0.031))) continue;
+
+    // 手下方仍有连贯的外侧轮廓时，可能握着扫帚、法杖等长物件。
+    let outline = 0;
+    for (let y = Math.max(hip, bottom + Math.ceil(height * 0.045)); y < hip + height * 0.16 && y < height; y++) {
+      if (b.runs[y].some(run => onLeft
+        ? run.left < b.left - 1 && run.left <= left && run.right >= left - height * 0.04
+        : run.right > b.right + 1 && run.right >= right && run.left <= right + height * 0.04)) outline++;
+    }
+    if (outline >= height * 0.045) continue;
+
+    // 连同紧贴手的轮廓移动，手腕上方作为固定点。
+    const rim = Math.max(1, Math.round(height * 0.012));
+    bands.forEach((row, y) => {
+      const run = b.runs[y].find(r => row.left >= r.left && row.right <= r.right);
+      if (!run) return;
+      row.left = !side && onLeft && row.left - run.left <= height * 0.035 ? run.left : Math.max(run.left, row.left - rim);
+      row.right = !side && !onLeft && run.right - row.right <= height * 0.035 ? run.right : Math.min(run.right, row.right + rim);
+    });
+    hands.push({ top: top - Math.max(1, Math.round(height * 0.026)), bottom, bands, sign });
+  }
+  if (side) return hands.length === 1 ? hands : [];
+  return hands.filter(hand => hands.filter(other => other.sign === hand.sign).length === 1);
+}
+
+function stepFrame(b, view, leftStep, motion, feet, hands = []) {
+  const { width: w, height: h } = b.cv;
+  const a = b.pixels;
+  const img = new ImageData(w, h), out = img.data;
+  out.set(a);
+  const put = (dst, src, shade) => {
+    const alpha = a[src + 3];
+    if (!alpha) return;
+    const below = out[dst + 3] * (1 - alpha / 255);
+    const sum = alpha + below;
+    for (let channel = 0; channel < 3; channel++) {
+      out[dst + channel] = (a[src + channel] * shade * alpha + out[dst + channel] * below) / sum;
+    }
+    out[dst + 3] = sum;
+  };
+  const erase = part => part.bands.forEach(({ left, right }, y) => {
+    out.fill(0, (y * w + left) * 4, (y * w + right + 1) * 4);
+  });
+  const warp = (part, stride, lift, shade = 1) => {
+    const length = Math.max(1, (part.bottom ?? h - 1) - part.top);
+    part.bands.forEach(({ left, right }, y) => {
+      const t = (y - part.top) / length;
+      const ny = y - Math.round(lift * Math.pow(t, 1.25));
+      const dx = Math.round(stride * t);
+      for (let x = left; x <= right; x++) {
+        const nx = x + dx;
+        if (ny >= 0 && ny < h && nx >= 0 && nx < w) put((ny * w + nx) * 4, (y * w + x) * 4, shade);
+      }
+    });
+  };
+  if (view === 'front' || view === 'back') {
+    const raised = feet[Number(leftStep === (view === 'front'))];
+    erase(raised);
+    warp(raised, 0, motion.lift);
+  } else {
+    const facingLeft = view === 'left';
+    const nearLeads = leftStep === facingLeft;
+    const stride = (leftStep ? -1 : 1) * motion.stride;
+    const [far, near = far] = feet;
+    erase(far);
+    if (near !== far) erase(near);
+    warp(far, -stride, nearLeads ? 0 : motion.sideLift, near === far ? 0.8 : 1);
+    warp(near, stride, nearLeads ? motion.sideLift : 0);
+  }
+  for (const hand of hands) {
+    const side = view === 'left' || view === 'right';
+    const isLeftArm = side ? view === 'left' : (hand.sign < 0) === (view === 'back');
+    const forward = isLeftArm !== leftStep;
+    const facing = view === 'left' ? -1 : 1;
+    erase(hand);
+    // 手盖在身体上时，用两边的衣服像素补上移开后的区域，避免出现透明洞。
+    hand.bands.forEach(({ left, right }, y) => {
+      if (left === 0 || right + 1 === w || !b.runs[y].some(run => run.left < left && run.right > right)) return;
+      const from = (y * w + left - 1) * 4, to = (y * w + right + 1) * 4;
+      for (let x = left; x <= right; x++) {
+        const mix = (x - left + 1) / (right - left + 2), i = (y * w + x) * 4;
+        for (let c = 0; c < 3; c++) out[i + c] = a[from + c] * (1 - mix) + a[to + c] * mix;
+        out[i + 3] = a[i + 3];
+      }
+    });
+    warp(hand, side ? motion.arm * facing * (forward ? 1 : -1) : 0, motion.arm * (forward ? 1 : 0.4));
   }
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-  const img = new ImageData(w, h);
-  for (let i = 0; i < out.length; i++) img.data[i] = out[i];
   cv.getContext('2d').putImageData(img, 0, 0);
   return cv;
 }
+
 function makeWalkSheet(views, o) {
-  // views：{ front, right, back }（Image 或 canvas）；o：{ height, step（迈步幅度，0 = 原地不动）, glow }
-  const H = Math.max(24, Math.min(240, Number(o.height) || 96));
-  const amp = Math.max(0, Math.min(2, o.step == null || o.step === '' ? 1 : Number(o.step)));
-  const bx = { front: viewBox(views.front), right: viewBox(views.right), back: viewBox(views.back) };
-  const s = H / (bx.front.fy - bx.front.y0), k = amp / s;
-  const half = Math.max(...Object.values(bx).map(b => Math.max(b.fx - b.x0, b.x1 + 1 - b.fx))) * s + WALK.stride * amp;
-  const top = Math.max(...Object.values(bx).map(b => b.fy - b.y0)) * s;
+  const height = Math.round(Math.max(24, Math.min(240, Number(o.height) || 96)));
+  const amp = Math.max(0, Math.min(2, Number(o.step ?? 1)));
+  const style = amp ? o.style || 'auto' : 'glide';
+  // 小尺寸成品先在较大的画布上识别脚缝，保留缩小后会合并的像素。
+  const workHeight = style === 'auto' ? Math.max(height, 96) : height;
+  const scale = height / workHeight;
+  const motion = {
+    lift: Math.max(2, height * 0.055) * amp / scale,
+    sideLift: Math.max(1, height * 0.022) * amp / scale,
+    stride: Math.max(2, height * 0.045) * amp / scale,
+    arm: Math.max(1, height * 0.021) * amp / scale,
+  };
+  const fitted = WALK_VIEWS.map(([view, label]) => {
+    let b;
+    try { b = fitWalkView(views[view], workHeight, style === 'auto' ? Math.ceil(motion.stride) : 0); }
+    catch (e) { throw new Error(label + '：' + e.message); }
+    const side = view === 'left' || view === 'right';
+    return { b, view, side, feet: style === 'auto' ? walkFeet(b, side) : null };
+  });
+  const hasFeet = fitted.some(v => !v.side && v.feet);
+  const colors = o.arms !== false && style === 'auto' ? walkFaceColors(fitted[0].b) : [];
+  const rows = fitted.map(({ b, view, side, feet }) => {
+    // 侧面的一双鞋常完全重叠。正面或背面确认有双脚时，才使用侧面鞋形补足前后脚。
+    if (!feet && side && hasFeet) {
+      const foot = traceWalkFoot(b, b.left, b.right);
+      if (foot) feet = [foot];
+    }
+    if (feet) {
+      const hands = colors.length ? walkHands(b, feet, view, colors) : [];
+      const frames = [stepFrame(b, view, true, motion, feet, hands), b.cv, stepFrame(b, view, false, motion, feet, hands)];
+      return { center: b.center, frames, mode: 'step', arms: hands.length };
+    }
+    return { center: b.center, frames: [b.cv, b.cv, b.cv], mode: style === 'glide' ? 'glide' : 'float' };
+  });
   const pad = o.glow ? 6 : 2;
-  const fw = Math.ceil((half + pad) * 2 / 2) * 2, fh = Math.ceil(top + pad + 4);
-  // 每个方向三帧：左脚 / 站 / 右脚（迈步幅度 0：三帧一样）
-  const frames = {};
-  for (const [key, kind] of [['front', 'front'], ['right', 'side'], ['back', 'front']]) {
-    const b = bx[key];
-    const f = amp > 0 ? [stepFrame(b, kind, -1, k), b.cv, stepFrame(b, kind, 1, k)] : [b.cv, b.cv, b.cv];
-    frames[key] = f.map(cv => shrinkCanvas(cv, s));
-  }
+  const float = rows.some(b => b.mode === 'float') ? Math.max(1, Math.round(height * 0.033 * amp)) : 0;
+  const half = Math.max(...rows.map(b => Math.max(b.center, b.frames[1].width - b.center)));
+  const fw = 2 * Math.ceil(half * scale + pad), fh = height + pad + 4 + float;
   const sheet = document.createElement('canvas'); sheet.width = fw * 3; sheet.height = fh * 4;
   const g = sheet.getContext('2d');
-  const rows = [['front', false], ['right', true], ['right', false], ['back', false]];   // 下 左 右 上
-  rows.forEach(([key, flip], row) => {
-    const b = bx[key];
-    for (let col = 0; col < 3; col++) {
-      const im = frames[key][key === 'back' ? 2 - col : col];
-      const ox = col * fw, oy = row * fh;
+  g.imageSmoothingEnabled = scale < 1;
+  g.imageSmoothingQuality = 'high';
+  if (o.glow) { g.shadowColor = o.glow; g.shadowBlur = 5; }
+  rows.forEach(({ center, frames, mode }, row) => {
+    frames.forEach((im, col) => {
+      const x = col * fw, y = row * fh;
       g.save();
-      g.beginPath(); g.rect(ox, oy, fw, fh); g.clip();
-      const dx = fw / 2 - b.fx * s, dy = fh - 3 - b.fy * s;
-      if (flip) { g.translate(ox + fw, oy); g.scale(-1, 1); } else g.translate(ox, oy);
-      if (o.glow) { g.shadowColor = o.glow; g.shadowBlur = 5; g.drawImage(im, Math.round(dx), Math.round(dy)); g.shadowBlur = 0; }
-      g.drawImage(im, Math.round(dx), Math.round(dy));
+      g.beginPath(); g.rect(x, y, fw, fh); g.clip();
+      const rise = mode === 'float' && col !== 1 ? float : 0;
+      g.drawImage(im, x + Math.round(fw / 2 - center * scale), y + pad + 1 + float - rise, Math.max(1, Math.round(im.width * scale)), height);
       g.restore();
-    }
+    });
   });
-  return { sheet, fw, fh };
+  return { sheet, fw, fh, modes: rows.map(r => r.mode), arms: rows.map(r => r.arms || 0) };
 }
 // 预览：四个方向一起走（0 1 2 1）
 function walkPreview(box, made) {
@@ -430,76 +715,145 @@ function walkPreview(box, made) {
   box.appendChild(cv);
   setTimeout(tick, 0);
 }
-async function threeViewDialog() {
-  let views = null, made = null;
-  const r = await openDialog(`<header><h3>从三视图做小人</h3></header>
+async function fourViewDialog() {
+  const inputs = {};
+  let made = null;
+  const r = await openDialog(`<header><h3>从四视图做小人</h3></header>
     <div class="dbody">
-      <label class="drop" id="drop"><input type="file" accept="image/png" id="tvf" multiple hidden><span>把一张<b>三视图</b>（正面、右侧、背面从左到右排）拖到这里，或者三张单图一起拖进来</span></label>
-      <div class="fnote">三张单图按文件名认：带「正」「前」「front」的是正面，带「右」「侧」「side」的是右侧，带「背」「后」「back」的是背面；认不出来就按顺序。背景要透明。朝左那一行用右侧镜像出来。</div>
-      <div id="tvPrev" class="upprev"></div>
-      <div class="fgrid" id="tvForm" style="display:none">
-        <label for="tvH">身高（像素）</label><input id="tvH" type="number" min="24" max="240" value="96"><span class="faint" style="grid-column:2">游戏里一格是 48 像素；RPG Maker 默认小人大约 40</span>
-        <label for="tvStep">迈步幅度</label><select id="tvStep"><option value="1">正常</option><option value="1.5">大步</option><option value="0.6">小碎步</option><option value="0">不迈步（站着不动）</option></select>
-        <label for="tvGlow">外发光</label><select id="tvGlow"><option value="">无</option><option value="rgba(255,205,70,0.95)">金色</option><option value="rgba(255,60,50,0.95)">红色</option><option value="rgba(110,180,255,0.95)">蓝色</option></select>
-        <label for="tvName">文件名</label><input id="tvName" maxlength="60" placeholder="例：豪哥">
+      <details><summary>本工程的小人尺寸和示例</summary><div id="walkGuide">正在读取…</div></details>
+      <button class="drop" id="walkBulk" type="button">选择或拖入横排四视图，也可一次导入四张已命名的 PNG</button>
+      <input type="file" accept="image/png" id="walkFiles" multiple hidden>
+      <div class="fnote">用透明背景的站姿图。横排图按正面、左侧、右侧、背面等宽排列。单图可按方向命名后一起导入，也可逐张选择。</div>
+      <div class="walk-inputs">
+        ${WALK_VIEWS.map(([view, label]) => `<div class="walk-view">
+          <span id="walk-label-${view}">${label}</span>
+          <button class="small walk-file" type="button" data-walk-view="${view}" aria-labelledby="walk-label-${view}">选择 PNG</button>
+          <input type="file" accept="image/png" id="walk-file-${view}" hidden>
+        </div>`).join('')}
       </div>
-      <div id="tvErr"></div>
+      <div id="walkAnimation" class="upprev"></div>
+      <div class="fgrid" id="walkOptions" style="display:none">
+        <label for="walkHeight">身高（像素）</label><input id="walkHeight" type="number" min="24" max="240" value="96"><span class="faint" style="grid-column:2">游戏里一格是 48 像素。四个方向按同一身高、脚底对齐。</span>
+        <label for="walkStyle">动作方式</label><select id="walkStyle"><option value="auto">自动识别双脚</option><option value="float">轻微浮动</option><option value="glide">平移</option></select>
+        <label for="walkStep">动作幅度</label><select id="walkStep"><option value="1">正常</option><option value="1.5">大</option><option value="0.6">小</option><option value="0">无</option></select>
+        <span>摆臂</span><label><input id="walkArms" type="checkbox" checked> 自动识别可见的手</label>
+        <label for="walkGlow">外发光</label><select id="walkGlow"><option value="">无</option><option value="rgba(255,205,70,0.95)">金色</option><option value="rgba(255,60,50,0.95)">红色</option><option value="rgba(110,180,255,0.95)">蓝色</option></select>
+        <label for="walkName">文件名</label><input id="walkName" maxlength="60" placeholder="例：小明">
+      </div>
+      <div id="walkPreview" class="upprev"></div>
+      <div id="walkError" role="alert"></div>
     </div>
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok disabled>保存成行走图</button></footer>`,
     (d, done) => {
-      const fail = m => { $('#tvErr', d).innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
+      const guide = $('#walkGuide', d);
+      guide.parentElement.addEventListener('toggle', () => {
+        if (guide.parentElement.open) api('sprite-guide').then(info => { if (guide.isConnected) showSpriteGuide(guide, info); })
+          .catch(() => { if (guide.isConnected) guide.textContent = '暂时无法读取本工程的推荐尺寸'; });
+      });
+      const generation = d._gen;
+      const active = () => d.open && d._gen === generation;
+      const slots = $$('[data-walk-view]', d), bulk = $('#walkBulk', d);
+      const options = $('#walkOptions', d), name = $('#walkName', d), save = $('[data-ok]', d);
+      const fail = m => { $('#walkError', d).innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
+      let busy = false;
+      const setBusy = value => {
+        busy = value;
+        for (const control of [bulk, ...slots, ...$$('input,select', options)]) control.disabled = busy;
+        save.disabled = busy || !made;
+      };
       const redraw = () => {
-        const box = $('#tvPrev', d); box.innerHTML = '';
-        if (!views) return;
+        const animation = $('#walkAnimation', d), box = $('#walkPreview', d);
+        animation.replaceChildren();
+        box.replaceChildren();
+        made = null;
+        save.disabled = true;
+        if (WALK_VIEWS.some(([view]) => !inputs[view])) return;
+        options.style.display = '';
         try {
-          made = makeWalkSheet(views, { height: $('#tvH', d).value, step: $('#tvStep', d).value, glow: $('#tvGlow', d).value });
-          walkPreview(box, made);
+          const views = Object.fromEntries(WALK_VIEWS.map(([view]) => [view, inputs[view].image]));
+          const arms = $('#walkArms', d).checked;
+          made = makeWalkSheet(views, { height: $('#walkHeight', d).value, step: $('#walkStep', d).value, glow: $('#walkGlow', d).value, style: $('#walkStyle', d).value, arms });
+          walkPreview(animation, made);
+          const modes = document.createElement('div'); modes.className = 'faint';
+          const label = { step: '交替迈步', float: '轻微浮动', glide: '平移' };
+          modes.textContent = WALK_VIEWS.map(([, direction], i) => direction + ' ' + label[made.modes[i]]).join(' · ');
+          animation.appendChild(modes);
+          if (arms && made.modes.includes('step')) {
+            const summary = document.createElement('div'); summary.className = 'dim';
+            const detected = WALK_VIEWS.flatMap(([, direction], i) => made.arms[i] ? [direction + ' ' + made.arms[i] + ' 只'] : []);
+            summary.textContent = detected.length ? '摆臂方向 · ' + detected.join(' · ') : '手部位置不明确，保留原姿势';
+            animation.appendChild(summary);
+          }
           const img = document.createElement('img'); img.src = made.sheet.toDataURL('image/png'); img.className = 'upimg'; img.style.imageRendering = 'auto'; box.appendChild(img);
           const meta = document.createElement('div'); meta.className = 'dim'; meta.style.fontSize = '12.5px';
-          meta.textContent = `${made.sheet.width} × ${made.sheet.height}，每帧 ${made.fw} × ${made.fh}（单人图，文件名会加 $）`;
+          meta.textContent = `${made.sheet.width} × ${made.sheet.height}，每帧 ${made.fw} × ${made.fh}`;
           box.appendChild(meta); fail('');
-          $('[data-ok]', d).disabled = false;
-        } catch (e) { made = null; fail(e.message); $('[data-ok]', d).disabled = true; }
+          save.disabled = busy;
+        } catch (e) { made = null; fail(e.message); }
       };
-      const pick = async files => {
-        fail(''); views = null;
-        try {
-          const ims = [];
-          for (const f of files) ims.push({ name: f.name, im: await loadFileImage(f) });
-          if (ims.length === 1) {
-            // 一张三视图：等分成三份
-            const im = ims[0].im, w = Math.floor(im.naturalWidth / 3), h = im.naturalHeight;
-            const part = i => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, -i * w, 0); return c; };
-            views = { front: part(0), right: part(1), back: part(2) };
-          } else if (ims.length === 3) {
-            const find = re => ims.find(x => re.test(x.name));
-            const fr = find(/正|前|front/i), ri = find(/右|侧|side|right/i), bk = find(/背|后|back/i);
-            views = fr && ri && bk && new Set([fr, ri, bk]).size === 3 ? { front: fr.im, right: ri.im, back: bk.im } : { front: ims[0].im, right: ims[1].im, back: ims[2].im };
-          } else throw new Error('要一张三视图，或者正面、右侧、背面三张图');
-          if (!$('#tvName', d).value) {
-            const n0 = files[0].name.replace(/\.png$/i, '').replace(/^\d+_/, '').replace(/^[!$]+/, '');
-            $('#tvName', d).value = (files.length === 1 ? n0.replace(/[_ ]?三视图$/, '') : '').replace(/[^\w一-鿿 .()\-]/g, '_').slice(0, 50);
-          }
-          $('#tvForm', d).style.display = '';
-          redraw();
-        } catch (e) { fail(e.message); }
-      };
-      $('#tvf', d).onchange = e => e.target.files.length && pick([...e.target.files]);
-      const drop = $('#drop', d);
-      drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
-      drop.ondragleave = () => drop.classList.remove('over');
-      drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files.length) pick([...e.dataTransfer.files]); };
-      for (const id of ['#tvH', '#tvStep', '#tvGlow']) $(id, d).onchange = redraw;
-      $('[data-x]', d).onclick = () => done(null);
-      $('[data-ok]', d).onclick = async () => {
+      const pick = async (files, view) => {
+        if (busy || !files.length) return;
+        setBusy(true);
         fail('');
         try {
-          const base = $('#tvName', d).value.trim();
-          if (!base) throw new Error('起个文件名');
-          if (!made) throw new Error('先放图');
-          const x = await api('image/save', { sub: 'characters', name: '$' + base.replace(/^[!$]+/, ''), data: made.sheet.toDataURL('image/png'), overwrite: false });
+          const loaded = {};
+          if (view) {
+            if (files.length !== 1) throw new Error('每个方向选一张 PNG');
+            loaded[view] = { image: await loadFileImage(files[0]), name: files[0].name };
+          } else if (files.length === 1) {
+            const image = await loadFileImage(files[0]);
+            if (image.naturalWidth % 4) throw new Error('横排四视图的宽度要能等分成四份');
+            const w = image.naturalWidth / 4, h = image.naturalHeight;
+            WALK_VIEWS.forEach(([key], i) => {
+              const part = document.createElement('canvas'); part.width = w; part.height = h;
+              part.getContext('2d').drawImage(image, i * w, 0, w, h, 0, 0, w, h);
+              loaded[key] = { image: part, name: files[0].name };
+            });
+          } else if (files.length === 4) {
+            for (const file of files) {
+              const matches = WALK_VIEWS.filter(([key]) => WALK_VIEW_NAMES[key].test(file.name));
+              if (matches.length !== 1 || loaded[matches[0][0]]) {
+                throw new Error('有文件名无法唯一对应方向，请按正面、左侧、右侧、背面分别选择');
+              }
+              loaded[matches[0][0]] = { image: await loadFileImage(file), name: file.name };
+            }
+          } else throw new Error('请选择一张横排四视图，或四张单图');
+          if (!active()) return;
+          Object.assign(inputs, loaded);
+          for (const button of slots) {
+            const file = inputs[button.dataset.walkView];
+            if (file) button.title = button.textContent = file.name;
+          }
+          if (!name.value && !view && files.length === 1) {
+            name.value = files[0].name.replace(/\.png$/i, '').replace(/^[!$]+/, '')
+              .replace(/[_ -]?四视图(?:[_ -]?横排)?$/, '').replace(/[^\w一-鿿 .()\-]/g, '_').slice(0, 50);
+          }
+          redraw();
+        } catch (e) { if (active()) fail(e.message); }
+        finally { if (active()) setBusy(false); }
+      };
+      const bindPicker = (button, input, view) => {
+        button.onclick = () => input.click();
+        input.onchange = () => { const files = [...input.files]; input.value = ''; pick(files, view); };
+        button.ondragover = e => { e.preventDefault(); button.classList.add('over'); };
+        button.ondragleave = () => button.classList.remove('over');
+        button.ondrop = e => { e.preventDefault(); button.classList.remove('over'); pick([...e.dataTransfer.files], view); };
+      };
+      bindPicker(bulk, $('#walkFiles', d));
+      for (const button of slots) bindPicker(button, $('#walk-file-' + button.dataset.walkView, d), button.dataset.walkView);
+      for (const id of ['#walkHeight', '#walkStyle', '#walkStep', '#walkArms', '#walkGlow']) $(id, d).onchange = redraw;
+      $('[data-x]', d).onclick = () => done(null);
+      save.onclick = async () => {
+        if (busy || !made) return;
+        const base = name.value.trim().replace(/^[!$]+/, '').trim();
+        if (!base) { fail('起个文件名'); name.focus(); return; }
+        setBusy(true);
+        fail('');
+        try {
+          const x = await api('image/save', { sub: 'characters', name: '$' + base, data: made.sheet.toDataURL('image/png'), overwrite: false });
           done(x);
-        } catch (e) { fail(e.message); }
+        } catch (e) { if (active()) fail(e.message); }
+        finally { if (active()) setBusy(false); }
       };
     });
   if (!r) return;

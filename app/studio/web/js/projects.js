@@ -204,7 +204,7 @@ function playUrl(o = {}) {
   return P.play + (s ? '?' + s : '');
 }
 function playGame(o) {
-  if (S.dirty && !confirm('改的台词还没保存，试玩的是保存过的版本。继续？')) return;
+  if (S.dirty && !confirm('还有未保存的修改，试玩的是上次保存的版本。继续？')) return;
   const u = playUrl(o);
   if (u) window.open(u, 'rpgstudio-play');
 }

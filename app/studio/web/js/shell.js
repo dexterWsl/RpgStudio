@@ -7,7 +7,7 @@ function route() {
 }
 let lastHash = location.hash;
 window.addEventListener('hashchange', () => {
-  if (S.dirty && !confirm('改的台词还没保存，确定离开？')) { history.replaceState(null, '', lastHash || '#/'); return; }
+  if (S.dirty && !confirm('还有未保存的修改，确定离开？')) { history.replaceState(null, '', lastHash || '#/'); return; }
   S.dirty = false;
   lastHash = location.hash;
   render();
