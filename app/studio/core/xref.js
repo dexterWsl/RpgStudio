@@ -7,6 +7,7 @@
 
 const impact = require('./impact.js');
 const choicecond = require('./choicecond.js');
+const { rulesOf, describePassive } = require('./variable-rules.js');
 
 const SCRIPT_REFS = [
   [/\$gameSwitches\.(?:setValue|value)\(\s*(\d+)\s*[,)]/g, 'switch'],
@@ -146,6 +147,22 @@ function createXref(project, describer) {
         }
       });
     });
+    const variableRules = rulesOf(P.read('System.json'));
+    for (const [key, passive] of Object.entries(variableRules.passive)) {
+      const id = Number(key);
+      if (passive && P.has('var', id)) add('var', id, 'set', { type: 'var-rule', rule: 'passive', id }, -1, describePassive(passive));
+    }
+    for (const [key, group] of Object.entries(variableRules.groups)) {
+      const id = Number(key);
+      if (!group?.terms?.length || !P.has('switch', id)) continue;
+      const at = { type: 'var-rule', rule: 'group', id };
+      const tests = group.terms.map(t => [1, t.id, 0, t.value, t.op]);
+      const terms = tests.map(t => impact.commandTest(t, describer)[0][0]);
+      const rule = { type: 'booleanGroup', groups: group.mode === 'any' ? terms.map(t => [t]) : [terms] };
+      const text = tests.map(describer.condText).join(group.mode === 'any' ? ' 或者 ' : ' 并且 ');
+      add('switch', id, 'set', at, -1, '条件决定布尔结果 · ' + text);
+      for (const target of impact.targets(rule.groups)) add('var', target.id, 'check', at, -1, text, rule);
+    }
     // 数据库角色的行走图 / 头像
     for (const a of project.read('Actors.json') || []) {
       if (!a) continue;

@@ -4,6 +4,7 @@
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
 const { need, int, UserError } = require('../lib/util.js');
 const { writeLinks } = require('../core/people.js');
+const { parsePassive, changeRule } = require('../core/variable-rules.js');
 const fs = require('fs');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
@@ -183,11 +184,13 @@ module.exports = function (ctx) {
       const label = String(b.label || '').trim().slice(0, 30);
       need(label, '给数值起个名字');
       const name = (p.name + '·' + label).slice(0, 40);
+      const passive = kind === 'var' ? parsePassive(b.passive) : undefined;
       // 新开关 / 变量和手动关联一次写完（分两次写要重建两遍索引，慢）
       const id = V.freeSlot(T, kind);
       need(id >= 1 && id <= 5000, '编号不对');
       T.store.edit(['System.json', ...(p.actorId ? ['Actors.json'] : [])], docs => {
-        const arr = docs['System.json'][kind === 'var' ? 'variables' : 'switches'];
+        const system = docs['System.json'];
+        const arr = system[kind === 'var' ? 'variables' : 'switches'];
         while (arr.length <= id) arr.push('');
         arr[id] = name;
         if (p.actorId) {
@@ -197,6 +200,7 @@ module.exports = function (ctx) {
           links.push({ kind, id });
           a.note = writeLinks(a.note, links);
         }
+        if (passive !== undefined) changeRule(ctx, system, 'passive', id, passive);
       });
       // 改条件弹窗里只要编号和名字；人物页才要整个人物视图
       return { id, kind, name, person: b.view === false ? undefined : personView(tools(), p.key) };

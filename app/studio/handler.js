@@ -72,6 +72,7 @@ function createStudio(opts) {
     if (at.type === 'ce') return project.label('ce', at.ce);
     if (at.type === 'troop') return project.label('troop', at.troop) + ` · 第 ${at.page + 1} 页`;
     if (at.type === 'actor') return project.label('actor', at.actor);
+    if (at.type === 'var-rule') return at.rule === 'group' ? '变量组 · ' + project.label('switch', at.id) : '自动累计 · ' + project.label('var', at.id);
     return '';
   }
   const hint = key => profile().hints[key] || '';
@@ -96,7 +97,7 @@ function createStudio(opts) {
     const dir = project.dataDir();
     return path.relative(defaultDataDir(project.gameDir()), dir) ? dir : '';
   };
-  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId, workDataDir });
+  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId, workDataDir, system: project.sys });
 
   // ---------- 各功能模块 ----------
   const ctx = {

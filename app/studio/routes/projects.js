@@ -14,6 +14,7 @@ const { need, UserError } = require('../lib/util.js');
 const { writeZip } = require('../core/zip.js');
 const Blank = require('../core/blank.js');
 const mapEffects = require('../core/map-effects.js');
+const variableRules = require('../core/variable-rules.js');
 
 module.exports = function (ctx) {
   const reg = ctx.registry;
@@ -46,7 +47,7 @@ module.exports = function (ctx) {
       }
     };
     for (const sub of ['data', 'www/data', 'img', 'www/img', 'audio', 'www/audio', 'movies', 'www/movies']) walk(path.join(p.gameDir, sub), sub);
-    for (const rel of ['js/plugins.js', mapEffects.PLUGIN_FILE]) {
+    for (const rel of ['js/plugins.js', mapEffects.PLUGIN_FILE, variableRules.PLUGIN_FILE]) {
       for (const f of [rel, 'www/' + rel]) {
         const full = path.join(p.gameDir, f);
         try { if (fs.statSync(full).mtimeMs > since) out.push({ file: full, name: f }); } catch { }

@@ -73,6 +73,7 @@ module.exports = function (ctx) {
       pictures: { ...ctx.picOptions(), fromProfile: prof.pictures, custom: !!s.pictures },
       messageStyle: project.messageStyle(),
       canConfigure: ctx.canConfigure(),
+      variableRules: true,
       links: ctx.isBuiltin() ? ((typeof opts.links === 'function' ? opts.links() : opts.links) || []) : [],
     };
   }

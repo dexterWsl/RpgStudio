@@ -111,6 +111,7 @@ async function viewPerson(main, key) {
       <input id="nvLabel" placeholder="例：好感度、第二章进度" maxlength="30">
       <button class="primary small" id="nvGo">新建数值</button>
       <span class="faint" style="font-size:12px">名字会是「${esc(p.name)}·…」${p.actorId ? '，并自动关联到 TA' : ''}</span>
+      ${S.project?.variableRules ? passiveFields() : ''}
     </div>
     ${p.actorId ? `<div class="card newvar" id="lkCard" hidden><span>关联已有的</span><select id="lkKind"><option value="var">变量</option><option value="switch">开关</option></select><select id="lkId" style="flex:1;min-width:0"></select><button class="small" id="lkGo">关联</button><span class="faint" style="font-size:12px">关联记在角色备注里（&lt;RpgStudioLinks:…&gt;），游戏不受影响</span></div>` : ''}
     <div class="section"><h2>出现的地方</h2></div>
@@ -126,8 +127,11 @@ async function viewPerson(main, key) {
     const [kind, id] = b.dataset.pin.split(':');
     try { await api('person/link', { actor: p.actorId, kind, id: Number(id), on: !b.classList.contains('on') }); toast(b.classList.contains('on') ? '已取消关联' : '已关联'); render(); } catch (e) { toast(e.message, true); }
   });
+  const nvPassive = bindPassiveFields($('#nvCard', main), () => $('#nvKind').value === 'var');
+  if (nvPassive) $('#nvKind').onchange = nvPassive.sync;
   $('#nvGo').onclick = async () => {
-    try { const r = await api('person/newvar', { key: p.key, kind: $('#nvKind').value, label: $('#nvLabel').value }); toast(`已新建${r.kind === 'var' ? '变量' : '开关'} ${r.id}「${r.name}」`); S.lookups = {}; S.project = await api('project'); render(); }
+    const kind = $('#nvKind').value, passive = kind === 'var' ? nvPassive?.value() : undefined;
+    try { const r = await api('person/newvar', { key: p.key, kind, label: $('#nvLabel').value, passive }); toast(`已新建${r.kind === 'var' ? '变量' : '开关'} ${r.id}「${r.name}」`); S.lookups = {}; S.project = await api('project'); render(); }
     catch (e) { toast(e.message, true); }
   };
   if ($('#lkGo')) {

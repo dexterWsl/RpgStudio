@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const mapEffects = require('./map-effects.js');
+const variableRules = require('./variable-rules.js');
 
 const PLUGIN = 'RpgStudio_Playtest';
 const MIME = {
@@ -75,6 +76,7 @@ function createPlaytest(o) {
     if (rel === 'js/plugins/' + PLUGIN + '.js') return send(200, MIME['.js'], pluginSource());
     const workDataDir = o.workDataDir && o.workDataDir();
     if (workDataDir && rel === mapEffects.PLUGIN_FILE) return send(200, MIME['.js'], fs.readFileSync(mapEffects.SOURCE, 'utf8'));
+    if (workDataDir && rel === variableRules.PLUGIN_FILE) return send(200, MIME['.js'], fs.readFileSync(variableRules.SOURCE, 'utf8'));
     const workFile = workDataDir && /^data\/([\w]+\.json)$/.exec(rel);
     const base = workFile ? workDataDir : root;
     const file = path.resolve(base, workFile ? workFile[1] : rel);
@@ -87,6 +89,12 @@ function createPlaytest(o) {
       // 游戏自己的插件列表后面加上试玩插件（只在发出去的这一份里加，文件不动）
       let src = fs.readFileSync(file, 'utf8');
       if (workDataDir) src += `\nif (!$plugins.some(p => p && p.name === "${mapEffects.PLUGIN}" && p.status)) $plugins.push({ name: "${mapEffects.PLUGIN}", status: true, description: "rpgStudio 地图效果", parameters: {} });\n`;
+      if (workDataDir && o.system) {
+        const rules = variableRules.rulesOf(o.system());
+        if (Object.keys(rules.passive).length || Object.keys(rules.groups).length) {
+          src += `\nif (!$plugins.some(p => p && p.name === "${variableRules.ENTRY.name}" && p.status)) $plugins.push(${JSON.stringify(variableRules.ENTRY)});\n`;
+        }
+      }
       return send(200, type, src + `\n$plugins.push({ name: "${PLUGIN}", status: true, description: "rpgStudio 试玩", parameters: {} });\n`);
     }
     // 视频要能拖进度条：支持 Range

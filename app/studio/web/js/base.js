@@ -135,6 +135,7 @@ async function pickNameOrCreate(title, kind) {
       <div class="cnew"><button type="button" class="small quiet" id="pcNew">＋ 新建${label}</button></div>
       <div id="pcForm" hidden>
         <div class="fgrid"><label for="pcName">名字</label><input id="pcName" maxlength="40" placeholder="比如：${kind === 'var' ? '好感度' : '见过长老'}"><button type="button" class="small primary" id="pcOk">新建</button></div>
+        ${kind === 'var' && S.project?.variableRules ? passiveFields() : ''}
         <div class="fnote">直接写进游戏的数据（System.json），用第一个空着的编号；建好就插到光标处。</div>
         <div id="pcErr"></div>
       </div>
@@ -142,6 +143,7 @@ async function pickNameOrCreate(title, kind) {
     <footer><span class="sp"></span><button data-x>取消</button></footer>`,
     (d, done) => {
       const input = $('#pq', d), list = $('#pl', d);
+      const passive = kind === 'var' ? bindPassiveFields(d) : null;
       const draw = q => {
         const hit = rows.filter(r => !q || (r.id + ' ' + r.name).toLowerCase().includes(q)).slice(0, 240);
         list.innerHTML = hit.map(r => {
@@ -155,7 +157,7 @@ async function pickNameOrCreate(title, kind) {
         const nm = $('#pcName', d).value.trim();
         if (!nm) { $('#pcName', d).focus(); return; }
         try {
-          const x = await api('name', { kind, id: 'new', name: nm });
+          const x = await api('name', { kind, id: 'new', name: nm, passive: passive?.value() });
           S.lookups = {};
           done(x && x.name ? x.name : nm);
         } catch (e) { $('#pcErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }

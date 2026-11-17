@@ -572,6 +572,7 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
           <select id="cnWho" aria-label="属于谁"><option value="">不属于谁</option>${(people || []).map(p => `<option value="${esc(p.key)}">属于${esc(p.name)}</option>`).join('')}</select>
           <input id="cnName" placeholder="名字，比如 好感度" maxlength="30">
           <button type="button" class="small primary" id="cnOk">新建并填进条件</button>
+          ${S.project?.variableRules ? passiveFields() : ''}
         </div></div>
       <div class="csec"><span class="csec-t">触发和图像</span></div>
       <div class="fgrid">
@@ -621,11 +622,14 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
       // 就地新建开关 / 变量（属于某人时名字存成「人名·名字」并手动关联），建好直接选上
       $('#cNewBtn', d).onclick = () => { const f = $('#cNewForm', d); f.hidden = !f.hidden; if (!f.hidden) $('#cnName', d).focus(); };
       if ((people || []).length) $('#cnWho', d).value = people[0].key;
+      const cnPassive = bindPassiveFields(d, () => $('#cnKind', d).value === 'var');
+      if (cnPassive) $('#cnKind', d).onchange = cnPassive.sync;
       const cnSubmit = async () => {
         const kind = $('#cnKind', d).value, who = $('#cnWho', d).value, nm = $('#cnName', d).value.trim();
         if (!nm) { $('#cnName', d).focus(); return; }
         try {
-          const x = who ? await api('person/newvar', { key: who, kind, label: nm, view: false }) : await api('name', { kind, id: 'new', name: nm });
+          const passive = kind === 'var' ? cnPassive?.value() : undefined;
+          const x = who ? await api('person/newvar', { key: who, kind, label: nm, view: false, passive }) : await api('name', { kind, id: 'new', name: nm, passive });
           S.lookups = {};
           // 新编号可能是列表里本来就有的空槽（没名字），改它的文字；超出原来数量的往后加
           const putOpt = sel => { const o = [...sel.options].find(o => o.value === String(x.id)); if (o) o.textContent = x.id + ' ' + x.name; else sel.insertAdjacentHTML('beforeend', `<option value="${x.id}">${x.id} ${esc(x.name)}</option>`); };

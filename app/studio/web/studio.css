@@ -563,6 +563,17 @@ dialog.dlg-doll-sample{width:min(800px,calc(100vw - 24px))}
 .ntable input:hover{border-color:var(--line)}
 .ntable input:focus{background:var(--field);border-color:#3f5f80}
 .ntable .c{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink2);width:60px}
+.variable-groups{display:grid;gap:10px;padding:12px 14px;margin:0 0 16px}
+.variable-group{display:grid;gap:6px;padding:8px 0;border-top:1px solid var(--line2)}
+.variable-group.settlement-selected{outline:1px solid var(--acc);outline-offset:4px;border-radius:6px}
+.variable-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.passive-summary{font-size:12px;padding:0 7px 4px}
+.passive-fields,.passive-values{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.passive-fields{flex:1 1 100%;padding:4px 0}
+.passive-fields label{display:inline-flex;align-items:center;gap:6px}
+.passive-values input{width:6.5rem}
+.passive-values p{font-size:12px;width:100%}
+#groupConditions{width:100%;min-height:110px;resize:vertical}
 .flag{font-size:11.5px;border-radius:6px;padding:0 6px;white-space:nowrap}
 .flag.neverSet{color:#f0c58a;background:#2c2215}
 .flag.neverChecked{color:#9fb0c8;background:#1b2330}

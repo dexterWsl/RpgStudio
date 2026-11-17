@@ -2,14 +2,16 @@
 // 开关 / 变量：列表、改名、新建
 //   module.exports = ctx => ({ get, post })：get[路由](T, q, req) 返回 JSON；post[路由](T, body)
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
-const { need, int } = require('../lib/util.js');
+const { need, int, UserError } = require('../lib/util.js');
 const { changedValue, outcome } = require('../core/impact.js');
 const { isSettlement } = require('../core/settlements.js');
+const { OPERATORS, rulesOf, parsePassive, describePassive, changeRule } = require('../core/variable-rules.js');
 
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
   function namesView(T, kind) {
+    const ruleConfig = rulesOf(project.sys());
     const counts = T.xref.counts(kind);
     const audit = T.xref.audit(kind);
     const flag = {};
@@ -23,9 +25,23 @@ module.exports = function (ctx) {
       const c = counts[id] || {};
       if (!name && !c.total) continue;
       const o = own.get(id) || { shared: 0, people: [] };
-      out.push({ id, name, hint: hint(kind + ':' + id), check: c.check || 0, set: c.set || 0, script: c.script || 0, total: c.total || 0, flags: flag[id] || [], people: o.people, shared: o.shared });
+      const passive = kind === 'var' ? ruleConfig.passive[id] : null;
+      out.push({ id, name, hint: hint(kind + ':' + id), check: c.check || 0, set: c.set || 0, script: c.script || 0, total: c.total || 0, flags: flag[id] || [], people: o.people, shared: o.shared,
+        ...(passive ? { passive, passiveText: describePassive(passive) } : {}) });
     }
-    return { kind, total: n, rows: out, free: freeSlot(T, kind) };
+    const groups = kind === 'var' ? Object.entries(ruleConfig.groups).filter(([id]) => project.has('switch', id)).map(([id, group]) => ({
+      id: Number(id), label: project.label('switch', id), mode: group.mode,
+      text: group.terms.map(t => {
+        const line = ref => '变量 ' + ref + ' ' + OPERATORS[t.op] + ' ' + t.value;
+        const named = line(T.script.refText('var', t.id));
+        try {
+          const p = T.script.condParams(named, { strict: true });
+          if (p[0] === 1 && p[1] === t.id && p[3] === t.value && p[4] === t.op) return named;
+        } catch { }
+        return line(t.id);
+      }).join('\n'),
+    })) : [];
+    return { kind, total: n, rows: out, free: freeSlot(T, kind), groups, canWrite: !opts.readOnly };
   }
   // 第一个没名字、也没被用过的编号（新建开关/变量用）
   function freeSlot(T, kind) {
@@ -70,17 +86,57 @@ module.exports = function (ctx) {
     name(T, b) {
       const kind = b.kind === 'var' ? 'var' : b.kind === 'switch' ? 'switch' : null;
       need(kind, '只能改开关或变量的名字');
-      const name = String(b.name || '').trim().slice(0, 40);
-      let id = b.id === 'new' ? freeSlot(T, kind) : int(b.id);
+      const passive = kind === 'var' ? parsePassive(b.passive) : undefined;
+      const id = b.id === 'new' ? freeSlot(T, kind) : int(b.id);
+      let name = b.name === undefined ? undefined : String(b.name || '').trim().slice(0, 40);
       need(id >= 1 && id <= 5000, '编号不对');
       if (b.id === 'new') need(name, '起个名字');
       T.store.edit(['System.json'], docs => {
-        const arr = docs['System.json'][kind === 'var' ? 'variables' : 'switches'];
+        const system = docs['System.json'];
+        const arr = system[kind === 'var' ? 'variables' : 'switches'];
         need(id < arr.length || b.id === 'new', '编号超出范围');
         while (arr.length <= id) arr.push('');
+        if (passive !== undefined) changeRule(ctx, system, 'passive', id, passive);
+        if (name === undefined) name = String(arr[id] || '');
         arr[id] = name;
       });
       return { id, kind, name };
+    },
+    'variable/group'(T, b) {
+      const editing = b.id != null;
+      const fresh = !editing && b.switch === 'new';
+      const id = fresh ? freeSlot(T, 'switch') : int(editing ? b.id : b.switch, '请选择布尔结果开关');
+      need(id >= 1 && id <= 5000, '布尔结果开关编号不对');
+      const name = String(b.name || '').trim().slice(0, 40);
+      if (fresh) need(name, '请填写结果开关的名字');
+      const remove = b.remove === true;
+      need(!remove || editing, '请选择要删除的变量组');
+      let group = null;
+      if (!remove) {
+        need(['all', 'any'].includes(b.mode), '请选择全部满足或任一满足');
+        const terms = [];
+        for (const [line, raw] of String(b.text || '').split(/\r?\n/).entries()) {
+          const condition = raw.trim().replace(/^[#＃]\s*如果\s*/, '');
+          if (!condition) continue;
+          try {
+            const p = T.script.condParams(condition, { strict: true });
+            need(p[0] === 1 && p[2] === 0, '请每行写一条变量比较，例如「变量 好感度 >= 3」');
+            terms.push({ id: p[1], value: p[3], op: p[4] });
+          } catch (error) { throw new UserError('第 ' + (line + 1) + ' 行 · ' + error.message); }
+        }
+        need(terms.length > 0, '请至少填写一条变量条件');
+        group = { mode: b.mode, terms };
+      }
+      T.store.edit(['System.json'], docs => {
+        const system = docs['System.json'], exists = Object.hasOwn(rulesOf(system).groups, id);
+        need(editing ? exists : !exists, editing ? '找不到这个变量组' : '这个开关已是另一个变量组的布尔结果');
+        if (fresh) {
+          while (system.switches.length <= id) system.switches.push('');
+          system.switches[id] = name;
+        } else need(id < system.switches.length || remove, '这个开关不存在');
+        changeRule(ctx, system, 'groups', id, group);
+      });
+      return { id };
     },
     },
   };
