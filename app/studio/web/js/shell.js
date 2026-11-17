@@ -176,7 +176,7 @@ async function showRefs(kind, id) {
     $('#sideX').onclick = closeSide;
   } catch (e) { if (S.side === selection) side.innerHTML = `<div class="side-in"><div class="err">${esc(e.message)}</div></div>`; }
 }
-const hrefOf = at => !at ? '#/' : at.type === 'map' ? (at.ev != null ? `#/event/${at.map}/${at.ev}/${at.page || 0}` : `#/map/${at.map}`) : at.type === 'ce' ? `#/ce/${at.ce}` : at.type === 'actor' ? `#/people/a${at.actor}` : at.type === 'var-rule' ? `#/names/var/${at.rule === 'group' ? 'group-' : ''}${at.id}` : '#/';
+const hrefOf = at => !at ? '#/' : at.type === 'map' ? (at.ev != null ? `#/event/${at.map}/${at.ev}/${at.page || 0}` : `#/map/${at.map}`) : at.type === 'ce' ? `#/ce/${at.ce}` : at.type === 'actor' ? `#/people/a${at.actor}` : at.type === 'system' ? '#/system' : at.type === 'var-rule' ? `#/names/var/${at.rule === 'group' ? 'group-' : ''}${at.id}` : '#/';
 
 document.addEventListener('click', e => {
   const r = e.target.closest('.ref');

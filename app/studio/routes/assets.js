@@ -119,6 +119,35 @@ module.exports = function (ctx) {
     return null;
   }
 
+  const isSheet = sub => sub === 'characters' || sub === 'faces';
+  function sheetFiles(sub, name) {
+    const root = ctx.uploadRoot() || (ctx.workDataDir() ? null : project.gameImgRoot());
+    return project.imageFilesInRoot(sub, name, root);
+  }
+  ctx.views.sheetFiles = sheetFiles;
+
+  function deleteSheet(T, sub, name) {
+    const refs = T.xref.sheetRefs(sub, name);
+    need(!refs.length, `这张图有 ${refs.length} 处引用，请先到相关位置更换图像。`);
+    const files = sheetFiles(sub, name);
+    need(files.length, '找不到当前工程可删除的图像文件');
+    const dir = ctx.assetBackupDir('images');
+    fs.mkdirSync(dir, { recursive: true });
+    const backup = fs.mkdtempSync(path.join(dir, 'sheet-'));
+    const pairs = files.map(file => ({ file, copy: path.join(backup, path.basename(file)) }));
+    for (const { file, copy } of pairs) fs.copyFileSync(file, copy);
+    const removed = [];
+    try {
+      for (const pair of pairs) { fs.unlinkSync(pair.file); removed.push(pair); }
+    } catch (error) {
+      for (const { file, copy } of removed) {
+        try { fs.copyFileSync(copy, file, fs.constants.COPYFILE_EXCL); } catch { }
+      }
+      throw new UserError('删除图像失败，备份在 ' + backup + '。' + error.message);
+    } finally { project.invalidateImages(); }
+    return { backup, remaining: !!project.findImage(sub, name) };
+  }
+
   const inStage = (id, rel) => {
     const d = stageDir(id);
     const f = path.resolve(d, String(rel || '').replace(/\\/g, '/'));
@@ -187,7 +216,7 @@ module.exports = function (ctx) {
             if (!file) continue;
             let st;
             try { st = fs.statSync(file); } catch { continue; }
-            const used = kind === 'img' ? ((usage[name] || {}).total || 0) : 0;
+            const used = kind !== 'img' ? 0 : isSheet(sub) ? T.xref.sheetRefs(sub, name).length : ((usage[name] || {}).total || 0);
             rows.push({ kind, sub, name, size: st.size, mtime: st.mtimeMs, used, ext: path.extname(file) });
           }
         }
@@ -215,6 +244,7 @@ module.exports = function (ctx) {
         const name = String(b.name || '');
         need((kind === 'img' ? IMG_SUBS : AUDIO_SUBS).includes(sub), '分类不对');
         need(name && !name.includes('..'), '名字不对');
+        if (kind === 'img' && isSheet(sub)) return deleteSheet(T, sub, name);
         const file = kind === 'img' ? project.findImage(sub, name) : findAudio(sub, name);
         need(file && fs.existsSync(file), '找不到这个文件（可能已经删掉了）');
         const dir = ctx.assetBackupDir(kind === 'img' ? 'images' : 'audio');

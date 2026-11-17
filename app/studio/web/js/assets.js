@@ -66,7 +66,7 @@ async function viewAssets(main) {
   $('#asFile').onchange = e => send([...e.target.files].map(f => ({ file: f, rel: f.name })));
   $('#asDir').onchange = e => send([...e.target.files].map(f => ({ file: f, rel: f.webkitRelativePath || f.name })));
   if (AS && AS.id) loadStaging(AS.id).catch(() => { AS = null; });
-  loadLib();
+  loadLib(true);
 }
 
 // ---------------- 已导入的素材：看看有哪些、用过没有、删掉 ----------------
@@ -90,10 +90,11 @@ function libRow(r) {
     ? `<img loading="lazy" src="${img(r.sub, r.name)}" alt="">`
     : '<span class="liba">♪</span>';
   const used = r.kind !== 'img' ? '' : (r.used ? `<span class="tag">${r.used} 处用到</span>` : '<span class="dim">没被用到</span>');
+  const usedSheet = r.used && r.kind === 'img' && (r.sub === 'characters' || r.sub === 'faces');
   return `<div class="librow">${thumb}
     <span class="libname" title="${esc(r.sub + '/' + r.name)}">${esc(r.name)}<span class="faint"> · ${esc(r.sub)}</span></span>
     ${used}<span class="dim">${kb}</span>
-    <button type="button" class="small" data-libdel data-sub="${esc(r.sub)}" data-name="${esc(r.name)}" data-used="${r.used || 0}">删除</button></div>`;
+    <button type="button" class="small" data-libdel data-sub="${esc(r.sub)}" data-name="${esc(r.name)}" data-used="${r.used || 0}" ${usedSheet ? 'disabled title="可在小人库查看引用"' : ''}>删除</button></div>`;
 }
 
 function drawLib() {

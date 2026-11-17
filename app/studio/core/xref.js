@@ -5,8 +5,10 @@
 //   位置 at：{ type:'map', map, ev, page } | { type:'ce', ce } | { type:'troop', troop, page }
 // 另外顺便做全文搜索（台词、选项、事件名、公共事件名、开关/变量名）
 
+const { posix } = require('path');
 const impact = require('./impact.js');
 const choicecond = require('./choicecond.js');
+const { parseCmd: parseStageCmd } = require('./stage.js');
 const { rulesOf, describePassive } = require('./variable-rules.js');
 
 const SCRIPT_REFS = [
@@ -16,6 +18,10 @@ const SCRIPT_REFS = [
 ];
 
 const STR_KINDS = new Set(['picture', 'sprite', 'face']);
+function sheetKey(kind, name) {
+  const normalized = posix.normalize(name.replace(/\\/g, '/'));
+  return kind + ':' + (process.platform === 'win32' ? normalized.toLowerCase() : normalized);
+}
 
 function createXref(project, describer) {
   const P = project;
@@ -54,6 +60,7 @@ function createXref(project, describer) {
         for (const step of route?.list || []) {
           const arg = step?.parameters?.[0];
           if (step?.code === 27 || step?.code === 28) add('switch', arg, 'set', at, line, `移动路线 · 开关 ${step.code === 27 ? '开' : '关'}`);
+          if (step?.code === 41 && arg) add('sprite', arg + '#' + (Number(step.parameters[1]) || 0), 'set', at, line, '移动路线 · 更改图像');
           if (step?.code === 45) scan(String(arg || ''), at, line, 'script');
         }
       }
@@ -132,6 +139,12 @@ function createXref(project, describer) {
             if (p[1]) add('sprite', p[1] + '#' + (p[2] || 0), 'set', at, i, '更改角色图像');
             if (p[3]) add('face', p[3] + '#' + (p[4] || 0), 'set', at, i, '更改角色图像');
             break;
+          case 323: if (p[1]) add('sprite', p[1] + '#' + (p[2] || 0), 'set', at, i, '更改载具图像'); break;
+          case 356: case 357: {
+            const stage = parseStageCmd(c);
+            if (stage?.cmd === 'as' && stage.args?.sheet) add('sprite', stage.args.sheet + '#' + (Number(stage.args.index) || 0), 'set', at, i, '场景 · 扮演');
+            break;
+          }
           case 101: if (p[0]) add('face', p[0] + '#' + (p[1] || 0), 'say', at, i, t()); if (p[4]) for (const m of String(p[4]).matchAll(/\\N\[(\d+)\]/gi)) add('actor', m[1], 'say', at, i, t()); break;
           case 102:
             for (const label of p[0] || []) {
@@ -147,7 +160,8 @@ function createXref(project, describer) {
         }
       });
     });
-    const variableRules = rulesOf(P.read('System.json'));
+    const system = P.read('System.json');
+    const variableRules = rulesOf(system);
     for (const [key, passive] of Object.entries(variableRules.passive)) {
       const id = Number(key);
       if (passive && P.has('var', id)) add('var', id, 'set', { type: 'var-rule', rule: 'passive', id }, -1, describePassive(passive));
@@ -170,17 +184,32 @@ function createXref(project, describer) {
       if (a.characterName) add('sprite', a.characterName + '#' + (a.characterIndex || 0), 'actor', at, -1, '角色的行走图');
       if (a.faceName) add('face', a.faceName + '#' + (a.faceIndex || 0), 'actor', at, -1, '角色的头像');
     }
+    for (const [key, label] of [['boat', '小船'], ['ship', '大船'], ['airship', '飞艇']]) {
+      const vehicle = system?.[key];
+      if (vehicle?.characterName) add('sprite', vehicle.characterName + '#' + (vehicle.characterIndex || 0), 'show', { type: 'system' }, -1, label + '的图像');
+    }
     function scan(code, at, i, use) {
       for (const [re, kind] of SCRIPT_REFS) for (const m of code.matchAll(re)) add(kind, m[1], kind === 'ce' ? 'call' : use, at, i, '脚本：' + code.replace(/\s+/g, ' ').slice(0, 60));
+      // 纸娃娃 NPC 的互动攻击以及写成字面量的行走图切换。
+      for (const m of code.matchAll(/\.(setImage|setCharacterImage)\(\s*("(?:[^"\\]|\\.)*")\s*,\s*(\d+)\s*\)/g)) {
+        let name;
+        try { name = JSON.parse(m[2]); } catch { continue; }
+        if (name) add('sprite', name + '#' + m[3], 'script', at, i, '脚本 · 切换行走图');
+      }
     }
     // 按 kind:id 分组
-    const by = new Map();
+    const by = new Map(), bySheet = new Map();
     for (const r of refs) {
       const k = r.kind + ':' + r.id;
       if (!by.has(k)) by.set(k, []);
       by.get(k).push(r);
+      if (r.kind === 'sprite' || r.kind === 'face') {
+        const key = sheetKey(r.kind, r.id.slice(0, r.id.lastIndexOf('#')));
+        if (!bySheet.has(key)) bySheet.set(key, []);
+        bySheet.get(key).push(r);
+      }
     }
-    return { refs, by };
+    return { refs, by, bySheet };
   }
 
   const index = () => P.memoize('xref', build);
@@ -188,6 +217,9 @@ function createXref(project, describer) {
   function of(kind, id) {
     const key = kind + ':' + (STR_KINDS.has(kind) ? String(id) : Number(id));
     return (index().by.get(key) || []).slice();
+  }
+  function sheetRefs(sub, name) {
+    return (index().bySheet.get(sheetKey(sub === 'faces' ? 'face' : 'sprite', name)) || []).slice();
   }
   // 一类东西的使用次数：{ id → { check, set, call, ... , total } }
   function counts(kind) {
@@ -246,7 +278,7 @@ function createXref(project, describer) {
     return out;
   }
 
-  return { index, of, counts, search, audit, each };
+  return { index, of, sheetRefs, counts, search, audit, each };
 }
 
 module.exports = { createXref };

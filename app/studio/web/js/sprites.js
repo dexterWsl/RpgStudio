@@ -11,7 +11,7 @@ async function viewSprites(main, sub) {
     <div class="crumbs"><a href="#/people">人物</a><span>›</span><span>小人库</span></div>
     <div class="titlebar"><h1>小人库</h1>
       <div class="seg"><button data-sub="characters" class="${sub === 'characters' ? 'on' : ''}">行走图</button><button data-sub="faces" class="${sub === 'faces' ? 'on' : ''}">头像</button></div>
-      <span class="dim">${r.sheets.length} 张图</span><span class="sp"></span>
+      <span class="dim" id="spriteSheetCount">${r.sheets.length} 张图</span><span class="sp"></span>
       ${r.canWrite && sub === 'characters' ? '<a class="tag" href="#/sprites/doll">纸娃娃制作</a>' : ''}
       ${r.canWrite && sub === 'characters' ? '<button class="small" id="upFour">从四视图做</button>' : ''}
       ${r.canWrite ? `<button class="primary small" id="upNew">上传${sub === 'faces' ? '头像' : '小人'}</button>` : ''}</div>
@@ -19,14 +19,22 @@ async function viewSprites(main, sub) {
       <span class="dim" style="font-size:12.5px">点一个${sub === 'faces' ? '头像' : '小人'}看它用在哪里、替换或调整</span></div>
     <div id="sgrid" class="sheetgrid big"></div>
   </div>`;
+  const grid = $('#sgrid', main);
+  const count = $('#spriteSheetCount', main);
+  const onDeleted = (name, remaining) => {
+    if (!remaining) r.sheets = r.sheets.filter(s => s.name !== name);
+    if (!grid.isConnected) return;
+    count.textContent = `${r.sheets.length} 张图`;
+    draw();
+  };
   const draw = () => {
     const list = r.sheets.filter(s => (!q || s.name.toLowerCase().includes(q)) && (filter === 'all' || (filter === 'used' ? Object.keys(s.uses).length : !Object.keys(s.uses).length)));
-    $('#sgrid').innerHTML = list.map(s => `<div class="sheet card"><div class="sheetname">${esc(s.name)}${s.big ? ' <span class="faint">单人</span>' : ''}${s.object ? ' <span class="faint">物件</span>' : ''}</div>
+    grid.innerHTML = list.map(s => `<div class="sheet card"><div class="sheetname">${esc(s.name)}${s.big ? ' <span class="faint">单人</span>' : ''}${s.object ? ' <span class="faint">物件</span>' : ''}</div>
       <div class="sheetchars ${sub === 'faces' ? 'faces' : ''}">${(s.big ? [0] : [0, 1, 2, 3, 4, 5, 6, 7]).map(i => `<button class="schar" data-n="${esc(s.name)}" data-i="${i}" title="${s.uses[i] ? '用在 ' + s.uses[i] + ' 处' : '没被用到'}">${s.uses[i] ? `<em>${s.uses[i]}</em>` : ''}</button>`).join('')}</div></div>`).join('') || '<div class="empty">没有符合的图</div>';
-    $$('#sgrid .schar').forEach(b => {
+    $$('.schar', grid).forEach(b => {
       const em = $('em', b);
       mountSprite(b, b.dataset.n, Number(b.dataset.i), 2, sub === 'faces' ? 64 : 44, false, sub).then(() => { if (em) b.appendChild(em); });
-      b.onclick = () => { $$('#sgrid .schar.on').forEach(x => x.classList.remove('on')); b.classList.add('on'); showSheetChar(sub, b.dataset.n, Number(b.dataset.i), r.canWrite); };
+      b.onclick = () => { $$('.schar.on', grid).forEach(x => x.classList.remove('on')); b.classList.add('on'); showSheetChar(sub, b.dataset.n, Number(b.dataset.i), r.canWrite, onDeleted); };
     });
   };
   $$('[data-sub]', main).forEach(b => b.onclick = () => go('#/sprites/' + b.dataset.sub));
@@ -37,25 +45,48 @@ async function viewSprites(main, sub) {
   draw();
 }
 // 右栏：一个小人用在哪里 + 替换 / 调整
-async function showSheetChar(sub, name, index, canWrite) {
+async function showSheetChar(sub, name, index, canWrite, onDeleted) {
   const side = $('#side');
   $('#shell').classList.remove('noside');
   side.innerHTML = '<div class="side-in loading">正在查找…</div>';
-  S.side = { kind: sub, id: name + '#' + index };
-  const r = await api(`sheet-usage?sub=${sub}&name=${enc(name)}&index=${index}`);
+  const selection = S.side = { kind: sub, id: name + '#' + index };
+  const r = await api(`sheet-usage?sub=${sub}&name=${enc(name)}&index=${index}`).catch(e => {
+    if (S.side === selection) { closeSide(); toast(e.message, true); }
+  });
+  if (!r || S.side !== selection) return;
   const big = sub === 'characters' && isBigSheet(name);
+  const otherRefs = (r.sheetRefs || []).filter(x => Number(x.id.slice(x.id.lastIndexOf('#') + 1)) !== index);
+  const refLink = x => `<a class="refitem" href="${x.at.type === 'actor' ? '#/people/a' + x.at.actor : hrefOf(x.at)}"><div class="w">${esc(x.where)}</div><div class="t">${esc(x.text)}</div></a>`;
   side.innerHTML = `<div class="side-in">
     <button class="quiet small sideclose" id="sideX">关闭</button>
     <h2>${esc(name)}${big ? '' : ` · 第 ${index + 1} 个`}</h2>
     <div class="pbig side">${sub === 'faces' ? '<span class="pdir" data-dir="2"></span>' : ['2', '4', '6', '8'].map(d => `<span class="pdir" data-dir="${d}"></span>`).join('')}</div>
-    ${canWrite ? `<div class="edbar"><button class="small" id="scReplace">替换成上传的图</button>${sub === 'characters' ? '<button class="small" id="scAdjust">调整</button>' : ''}</div>` : ''}
+    ${canWrite ? `<div class="edbar"><button class="small" id="scReplace">替换成上传的图</button>${sub === 'characters' ? '<button class="small" id="scAdjust">调整</button>' : ''}
+      ${r.canDelete ? `<button class="small danger" id="scDelete" ${r.sheetRefs.length ? 'disabled' : ''}>删除整张图</button>` : ''}</div>` : ''}
+    ${canWrite && r.canDelete && r.sheetRefs.length ? '<div class="fnote">这张图仍在使用，请先更换下方引用的图像。</div>' : ''}
+    ${canWrite && r.canDelete === false ? '<div class="fnote">这张图位于当前工程的可删除目录之外。</div>' : ''}
     <div class="dim" style="margin-top:10px">${r.refs.length ? `用在 ${r.refs.length} 处` : '没有地方用到它'}</div>
-    ${r.refs.map(x => `<a class="refitem" href="${x.at.type === 'actor' ? '#/people/a' + x.at.actor : hrefOf(x.at)}"><div class="w">${esc(x.where)}</div><div class="t">${esc(x.text)}</div></a>`).join('')}
+    ${r.refs.map(refLink).join('')}
+    ${otherRefs.length ? `<div class="dim" style="margin-top:10px">同一张图的其他位置用在 ${otherRefs.length} 处</div>${otherRefs.map(refLink).join('')}` : ''}
   </div>`;
   $$('.pdir', side).forEach(el => mountSprite(el, name, index, Number(el.dataset.dir), sub === 'faces' ? 120 : 56, sub !== 'faces', sub));
   $('#sideX').onclick = closeSide;
   if ($('#scReplace')) $('#scReplace').onclick = () => uploadDialog(sub, { name, index, big });
   if ($('#scAdjust')) $('#scAdjust').onclick = () => adjustDialog(name, index);
+  const remove = $('#scDelete', side);
+  if (remove) remove.onclick = async () => {
+    remove.disabled = true;
+    try {
+      const confirmed = await confirmDialog('删除整张图', `删除「${name}」？${big ? '' : '同一张图里的所有位置都会删除。'}删除前会自动备份。`, '删除');
+      if (!confirmed) return;
+      const result = await api('assets/delete', { kind: 'img', sub, name });
+      forgetImage(sub, name);
+      if (S.side === selection) closeSide();
+      onDeleted(name, result.remaining);
+      toast(result.remaining ? '已删除工作区图片，现显示原游戏中同名的图' : '已删除整张图，原文件已备份');
+    } catch (e) { toast(e.message, true); }
+    finally { remove.disabled = false; }
+  };
 }
 
 // ---------- 上传 ----------

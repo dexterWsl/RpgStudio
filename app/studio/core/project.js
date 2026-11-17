@@ -286,6 +286,20 @@ function createProject(opts) {
     }
     return null;
   }
+  function imageFilesInRoot(sub, nm, root) {
+    sub = safeSub(sub);
+    const rel = String(nm || '').replace(/\\/g, '/');
+    if (!sub || !root || !rel || rel.includes('..')) return [];
+    let base;
+    try { base = fs.realpathSync(root); } catch { return []; }
+    return IMG_EXT.map(ext => safeJoin(path.join(root, sub), rel + ext)).filter(file => {
+      if (!file) return false;
+      const expected = path.join(base, path.relative(root, file));
+      try { return fs.lstatSync(file).isFile() && path.relative(expected, fs.realpathSync(file)) === ''; }
+      catch { return false; }
+    });
+  }
+  function invalidateImages() { imgCache.clear(); listCache.clear(); }
   const imgCache = new Map();
   function loadImage(sub, nm) {
     const f = findImage(sub, nm);
@@ -413,7 +427,7 @@ function createProject(opts) {
     gameDir, dataDir, file, exists, read, readFresh, invalidate, signature, memoize,
     sys, engine, info, rows, name, label, has, count, actorIdByName, expandN,
     mapList, map, mapFile,
-    imgRoots, gameImgRoot, findImage, loadImage, imageSize, listImages, writeImage, messageStyle,
+    imgRoots, gameImgRoot, findImage, imageFilesInRoot, invalidateImages, loadImage, imageSize, listImages, writeImage, messageStyle,
     gameRoot, assetDir, assetExists, writeAsset, plugins, plugin, findMovie,
     KIND_LABEL,
   };

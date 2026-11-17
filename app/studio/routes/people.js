@@ -94,9 +94,11 @@ module.exports = function (ctx) {
       sheets: (T, q) => ({ sub: q('sub') === 'faces' ? 'faces' : 'characters', sheets: sheetList(T, q('sub') === 'faces' ? 'faces' : 'characters'), canWrite: !opts.readOnly }),
       'sprite-guide': spriteGuide,
       'sheet-usage'(T, q) {
-        const kind = q('sub') === 'faces' ? 'face' : 'sprite';
-        const id = String(q('name') || '') + '#' + int(q('index') || 0);
-        return { refs: T.xref.of(kind, id).map(r => ({ ...r, where: where(r.at) })) };
+        const sub = q('sub') === 'faces' ? 'faces' : 'characters';
+        const name = String(q('name') || ''), index = int(q('index') || 0);
+        const all = T.xref.sheetRefs(sub, name).map(r => ({ ...r, where: where(r.at) }));
+        return { refs: all.filter(r => Number(r.id.slice(r.id.lastIndexOf('#') + 1)) === index), sheetRefs: all,
+          canDelete: !opts.readOnly && !!V.sheetFiles(sub, name).length };
       },
     },
     post: {
