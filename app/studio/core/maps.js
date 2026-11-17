@@ -21,11 +21,13 @@ function checkData(data, w, h) {
   }
 }
 
-// 改大小：左上角不动，右边 / 下边加宽或裁掉
-function resizeData(data, w, h, w2, h2) {
-  const out = new Array(w2 * h2 * 6).fill(0);
-  for (let z = 0; z < 6; z++) for (let y = 0; y < Math.min(h, h2); y++) for (let x = 0; x < Math.min(w, w2); x++) {
-    out[(z * h2 + y) * w2 + x] = data[(z * h + y) * w + x] || 0;
+// dx/dy 是旧地图原点在新地图中的位置，留白填 0。
+function resizeData(data, w, h, w2, h2, dx = 0, dy = 0, layers = 6) {
+  const out = new Array(w2 * h2 * layers).fill(0);
+  const left = Math.max(0, -dx), top = Math.max(0, -dy);
+  const right = Math.min(w, w2 - dx), bottom = Math.min(h, h2 - dy);
+  for (let z = 0; z < layers; z++) for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
+    out[(z * h2 + y + dy) * w2 + x + dx] = data[(z * h + y) * w + x] || 0;
   }
   return out;
 }

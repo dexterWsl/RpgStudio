@@ -207,6 +207,14 @@ body>header{flex:none;display:flex;align-items:center;gap:12px;padding:8px 14px;
 .weather-power input{flex:1;min-width:0}
 .weather-power output{min-width:2ch;text-align:center}
 .weather-preview{display:block;width:100%;height:auto;margin-top:12px;border:1px solid var(--line);border-radius:8px}
+dialog.dlg-map-resize{width:min(760px,calc(100vw - 24px))}
+.resize-edges{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.resize-edges label{display:grid;gap:5px}
+.resize-edges input{width:100%;min-width:0}
+.resize-preview{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:8px}
+#resizeWarning:not(:empty){color:var(--warn)}
+#resizeError:not(:empty){color:var(--red)}
+@media(max-width:440px){.resize-edges{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #mw_error:not(:empty){color:var(--bad);margin-top:8px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--ink2);font-size:12px;align-items:center}
 .legend span{display:inline-flex;align-items:center;gap:5px}

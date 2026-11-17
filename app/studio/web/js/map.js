@@ -49,7 +49,7 @@ async function viewMap(main, id, mode, opts = {}) {
   while (data.length < w * h * 6) data.push(0);
   const terrain = tiles.terrain.length ? tiles.terrain : new Array(w * h).fill(0);
   ME = {
-    id, m, w, h, data: data.concat(terrain), sheets, hash: tiles.hash, missing: tiles.missing || [], tileset: tiles.tileset, scrollType: tiles.scrollType,
+    id, m, w, h, data: data.concat(terrain), sheets, hash: tiles.hash, missing: tiles.missing || [], tileset: tiles.tileset, scrollType: tiles.scrollType, resizeLimit: tiles.resizeLimit,
     flags: (tiles.tileset && tiles.tileset.flags) || [],
     hasTiles: sheets.some(Boolean),
     mode: ['tiles', 'regions', 'height'].includes(mode) ? mode : 'events',
@@ -80,6 +80,7 @@ async function viewMap(main, id, mode, opts = {}) {
       <span class="sp"></span>
       <button class="small" id="mapPlay" title="跳过标题，直接从这张地图开始（开始地图就站在开始位置，别的地图找一格能站的）">▶ 在这里试玩</button>
       <button class="small" id="mapWeather">天气</button>
+      <button class="small" id="mapResize">调整尺寸</button>
       <button class="small" id="mapProps">地图属性</button>
       ${moreMenu([{ id: 'mapChild', label: '新建子地图' }, { id: 'mapCopy', label: '复制这张地图' }, { id: 'mapDel', label: '删除这张地图', danger: true }])}
     </div>
@@ -117,6 +118,7 @@ async function viewMap(main, id, mode, opts = {}) {
   $('#lblToggle').onchange = e => { S.labels = e.target.checked; remember(); $('#board').classList.toggle('labels', S.labels); };
   $('#mapProps').onclick = () => mapPropsDialog();
   $('#mapWeather').onclick = () => mapWeatherDialog();
+  $('#mapResize').onclick = () => mapResizeDialog();
   bindMenu(main);
   $('#mapChild').onclick = () => newMapDialog(id);
   $('#mapPlay').onclick = () => { const st = S.project.start || {}; playGame(st.map === id ? { map: id, x: st.x, y: st.y } : { map: id, x: -1, y: -1 }); };
@@ -813,6 +815,118 @@ async function tilesetOptions(sel) {
   const r = await api('tilesets');
   return r.tilesets.map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${t.id} ${esc(t.name)}${t.names ? '' : '（没有图）'}</option>`).join('');
 }
+function paintResizePreview(canvas, editor, edges, points) {
+  const g = canvas.getContext('2d'), { width: cw, height: ch } = canvas;
+  const { w, h } = editor;
+  const x = -edges.left, y = -edges.top, right = w + edges.right, bottom = h + edges.bottom;
+  const minX = Math.min(0, x), minY = Math.min(0, y);
+  const maxX = Math.max(w, right), maxY = Math.max(h, bottom);
+  const scale = Math.min((cw - 24) / (maxX - minX), (ch - 24) / (maxY - minY));
+  const ox = (cw - (maxX - minX) * scale) / 2 - minX * scale;
+  const oy = (ch - (maxY - minY) * scale) / 2 - minY * scale;
+  const nx = ox + x * scale, ny = oy + y * scale;
+  const nw = (right - x) * scale, nh = (bottom - y) * scale;
+  g.fillStyle = '#10151c'; g.fillRect(0, 0, cw, ch);
+  g.imageSmoothingEnabled = false;
+  g.globalAlpha = 0.35;
+  g.drawImage(editor.ctx.canvas, ox, oy, w * scale, h * scale);
+  g.globalAlpha = 1;
+  g.save();
+  g.beginPath(); g.rect(nx, ny, nw, nh); g.clip();
+  g.fillStyle = '#284567'; g.fillRect(nx, ny, nw, nh);
+  g.drawImage(editor.ctx.canvas, ox, oy, w * scale, h * scale);
+  g.restore();
+  g.strokeStyle = '#7f8c9d'; g.setLineDash([4, 4]);
+  g.strokeRect(ox, oy, w * scale, h * scale);
+  g.setLineDash([]); g.strokeStyle = '#65bdf4'; g.lineWidth = 2; g.strokeRect(nx, ny, nw, nh);
+  g.lineWidth = 1;
+  for (const p of points) {
+    g.fillStyle = p.cropped ? '#ff8d85' : '#ffe0a3';
+    g.beginPath(); g.arc(ox + (p.x + 0.5) * scale, oy + (p.y + 0.5) * scale, Math.max(2, Math.min(4, scale / 4)), 0, Math.PI * 2); g.fill();
+  }
+}
+
+async function mapResizeDialog() {
+  const editor = ME;
+  if (S.dirty || editor.saving) { toast('先保存或放弃图块、区域或高低差修改，再调整尺寸', true); return; }
+  const limit = editor.resizeLimit || 256;
+  const sides = [['left', '左边'], ['right', '右边'], ['top', '上边'], ['bottom', '下边']];
+  const result = await openDialog(`<header><h3>调整地图尺寸</h3></header>
+    <div class="dbody">
+      <p class="dim">按格数修改各边。扩大填正数，裁剪填负数，填 0 保留原边界。</p>
+      ${editor.resizeLimit ? '' : '<p class="fnote">当前服务可调整右边和下边。重启本地工具后可调整左边和上边。</p>'}
+      <div class="resize-edges">${sides.map(([key, label]) => `<label for="resize-${key}">${label}<input id="resize-${key}" type="number" min="-${limit}" max="${limit}" step="1" value="0" ${!editor.resizeLimit && (key === 'left' || key === 'top') ? 'disabled' : ''}></label>`).join('')}</div>
+      <div class="dim" id="resizeSummary" aria-live="polite"></div>
+      <canvas class="resize-preview" width="700" height="250" role="img" aria-label="地图扩大和裁剪预览"></canvas>
+      <p class="dim">蓝线是新边界，变暗的部分会被裁掉。</p>
+      <div id="resizeWarning" role="status"></div><div id="resizeError" role="alert"></div>
+    </div>
+    <footer><span class="sp"></span><button type="button" data-x>取消</button><button type="button" class="primary" data-ok disabled>应用尺寸</button></footer>`, (d, done) => {
+    const inputs = sides.map(([key]) => [key, $('#resize-' + key, d)]);
+    const canvas = $('.resize-preview', d), ok = $('[data-ok]', d), cancel = $('[data-x]', d), gen = d._gen;
+    const summary = $('#resizeSummary', d), warning = $('#resizeWarning', d), error = $('#resizeError', d);
+    const start = S.project.start || {};
+    const positions = editor.m.events.map(e => ({ x: e.x, y: e.y, label: '事件 ' + e.id + '「' + e.name + '」' }));
+    if (start.map === editor.id) positions.push({ x: start.x, y: start.y, label: '游戏起点' });
+    let saving = false, current = null;
+    const active = () => d.open && d._gen === gen;
+    const update = () => {
+      error.textContent = ''; warning.textContent = '';
+      const edges = Object.fromEntries(inputs.map(([key, input]) => [key, input.valueAsNumber]));
+      const width = editor.w + edges.left + edges.right, height = editor.h + edges.top + edges.bottom;
+      const valid = Object.values(edges).every(n => Number.isInteger(n) && Math.abs(n) <= limit) && width >= 1 && height >= 1 && width <= limit && height <= limit;
+      summary.textContent = `${editor.w} × ${editor.h} 格` + (valid ? ` → ${width} × ${height} 格` : '');
+      current = null; ok.disabled = true;
+      if (!valid) {
+        error.textContent = `填入整数，调整后的宽和高须在 1～${limit} 格之间。`;
+        paintResizePreview(canvas, editor, { left: 0, right: 0, top: 0, bottom: 0 }, positions);
+        return;
+      }
+      const points = positions.filter(p => p.x >= 0 && p.y >= 0 && p.x < editor.w && p.y < editor.h).map(p => {
+        const x = p.x + edges.left, y = p.y + edges.top;
+        return { ...p, cropped: x < 0 || y < 0 || x >= width || y >= height };
+      });
+      paintResizePreview(canvas, editor, edges, points);
+      const blocked = points.filter(p => p.cropped);
+      if (blocked.length) { warning.textContent = '请先移入保留范围：' + blocked.slice(0, 5).map(p => p.label).join('、'); return; }
+      if (Object.values(edges).some(n => n < 0)) warning.textContent = '裁掉的格子会移除，应用前会自动备份。';
+      if (Object.values(edges).some(Boolean)) { current = { edges, width, height }; ok.disabled = false; }
+    };
+    for (const [, input] of inputs) input.oninput = update;
+    d.classList.add('dlg-map-resize');
+    const preventClose = event => { if (saving) event.preventDefault(); };
+    d.addEventListener('cancel', preventClose);
+    d.addEventListener('close', () => { d.classList.remove('dlg-map-resize'); d.removeEventListener('cancel', preventClose); }, { once: true });
+    d.onclick = event => { if (event.target === d && !saving) done(); };
+    cancel.onclick = () => done();
+    ok.onclick = async () => {
+      if (!current || saving) return;
+      const { edges, width, height } = current;
+      saving = ok.disabled = cancel.disabled = true;
+      for (const [, input] of inputs) input.readOnly = true;
+      try {
+        let saved = { width, height };
+        if (editor.resizeLimit) saved = await api('map/resize', { map: editor.id, hash: editor.hash, edges });
+        else await api('map/update', { map: editor.id, width, height });
+        if (active()) done(saved);
+      } catch (e) { if (active()) error.textContent = e.message; }
+      finally {
+        if (active()) {
+          saving = ok.disabled = cancel.disabled = false;
+          for (const [, input] of inputs) input.readOnly = false;
+        }
+      }
+    };
+    update();
+  });
+  if (result && ME === editor) {
+    if (result.start) S.project.start = result.start;
+    toast(`地图尺寸已调整为 ${result.width} × ${result.height} 格`);
+    await refreshMaps();
+    if (ME === editor && route().name === 'map' && Number(route().a) === Number(editor.id)) render();
+  }
+}
+
 async function mapPropsDialog() {
   if (S.dirty) { toast('先保存或放弃地图修改，再改地图属性', true); return; }
   const p = ME.m.props;
@@ -827,7 +941,7 @@ async function mapPropsDialog() {
       <label for="mp_p">远景图</label><input id="mp_p" maxlength="200" value="${esc(p.parallaxName)}" placeholder="img/parallaxes 里的文件名">
       <label for="mp_note">备注</label><textarea id="mp_note" rows="3">${esc(p.note)}</textarea>
     </div>
-    <div class="fnote">改大小时左上角不动，右边和下边加宽或裁掉。裁掉的地方如果有事件，会先提示你挪进来。</div><div id="mpErr"></div></div>
+    <div class="fnote">这里的大小从右边和下边调整。可用地图顶部的「调整尺寸」预览并调整各边。</div><div id="mpErr"></div></div>
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>保存属性</button></footer>`,
     (d, done) => {
       $('[data-x]', d).onclick = () => done(null);

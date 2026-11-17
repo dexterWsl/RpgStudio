@@ -54,10 +54,50 @@ module.exports = function (ctx) {
     const missing = ts ? ts.names.filter(n => n && !project.findImage('tilesets', n)) : [];
     const parallax = { name: m.parallaxName || '', show: !!m.parallaxShow, found: !!(m.parallaxName && project.findImage('parallaxes', m.parallaxName)) };
     const terrain = terrainOf(m);
-    return { id, width: m.width, height: m.height, data: m.data || [], terrain, hash: mapHash(m, terrain), tileset: ts, missing, parallax, scrollType: m.scrollType || 0 };
+    return { id, width: m.width, height: m.height, data: m.data || [], terrain, hash: mapHash(m, terrain), tileset: ts, missing, parallax, scrollType: m.scrollType || 0, resizeLimit: Maps.MAX_SIZE };
   }
   const tilesetList = () => (project.read('Tilesets.json') || []).filter(t => t && t.id > 0).map(t => ({ id: t.id, name: t.name || '', mode: t.mode || 0, names: (t.tilesetNames || []).filter(Boolean).length }));
   const anyMapFile = () => { const m = project.mapList().find(x => x.hasFile); return m ? project.mapFile(m.id) : null; };
+
+  function resizePoints(T, id, map, { width, height, dx, dy }) {
+    if (!dx && !dy && width >= map.width && height >= map.height) return [];
+    const moves = [], blocked = [];
+    const add = (pos, xKey, yKey, file, get, label) => {
+      const x = pos?.[xKey], y = pos?.[yKey];
+      // 已在旧地图外的坐标维持原值。
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= map.width || y >= map.height) return;
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) { blocked.push(`${label()}（${x}, ${y}）`); return; }
+      if (dx || dy) moves.push({ file, get, xKey, yKey, x, y, nx, ny });
+    };
+    const mf = project.mapFile(id);
+    for (const [i, event] of (map.events || []).entries()) {
+      if (event) add(event, 'x', 'y', mf, m => m.events?.[i], () => `事件 ${event.id}「${event.name}」`);
+    }
+    const system = project.sys();
+    if (Number(system.startMapId) === id) add(system, 'startX', 'startY', 'System.json', sys => sys, () => '游戏起点');
+    for (const [key, label] of [['boat', '小船'], ['ship', '大船'], ['airship', '飞艇']]) {
+      if (Number(system[key]?.startMapId) === id) add(system[key], 'startX', 'startY', 'System.json', sys => sys[key], () => label + '起点');
+    }
+    T.xref.each((at, list) => {
+      const here = at.type === 'map' && at.map === id;
+      const file = at.type === 'map' ? project.mapFile(at.map) : at.type === 'ce' ? 'CommonEvents.json' : 'Troops.json';
+      const getList = at.type === 'map' ? m => m.events?.[at.ev]?.pages?.[at.page]?.list
+        : at.type === 'ce' ? ces => ces[at.ce]?.list : troops => troops[at.troop]?.pages?.[at.page]?.list;
+      for (const [i, c] of list.entries()) {
+        const p = c?.parameters;
+        if (!p) continue;
+        let key, kind;
+        if (c.code === 201 && p[0] === 0 && Number(p[1]) === id) { key = 2; kind = '传送落点'; }
+        if (c.code === 202 && p[1] === 0 && Number(p[2]) === id) { key = 3; kind = '载具位置'; }
+        if (here && c.code === 203 && p[1] === 0) { key = 2; kind = '设置事件位置'; }
+        if (here && c.code === 285 && p[2] === 0) { key = 3; kind = '获取位置信息'; }
+        if (kind) add(p, key, key + 1, file, doc => getList(doc)?.[i]?.parameters, () => `${kind} · ${ctx.where(at)}第 ${i + 1} 条`);
+      }
+    });
+    need(!blocked.length, '以下位置会被裁掉，请先移入保留范围。' + blocked.slice(0, 6).join('、') + (blocked.length > 6 ? `等 ${blocked.length} 处` : ''));
+    return moves;
+  }
 
   Object.assign(V, { mapView, tilesetOf });
   return {
@@ -108,6 +148,37 @@ module.exports = function (ctx) {
         if (!unchanged) m.note = Effects.writeWeather(m.note, weather);
       });
       return { weather };
+    },
+    'map/resize'(T, b) {
+      const id = int(b.map, '地图编号不对');
+      const mf = project.mapFile(id), map = project.map(id);
+      need(map, '地图 ' + id + ' 不存在');
+      const { left, right, top, bottom } = b.edges || {};
+      need([left, right, top, bottom].every(n => Number.isInteger(n) && Math.abs(n) <= Maps.MAX_SIZE), '每边调整量要填整数');
+      const width = map.width + left + right, height = map.height + top + bottom;
+      const validHash = m => mapHash(m, terrainOf(m)) === String(b.hash || '');
+      need(validHash(map), '地图尺寸、图块或高低差已在别处修改，刷新后再调整');
+      need(Maps.sizeOk(width, height), `调整后宽度和高度都要在 1～${Maps.MAX_SIZE} 格之间`);
+      if (![left, right, top, bottom].some(Boolean)) return { width, height };
+      const moves = resizePoints(T, id, map, { width, height, dx: left, dy: top });
+      T.store.edit([mf, ...moves.map(p => p.file)], docs => {
+        const current = docs[mf];
+        need(current && validHash(current), '地图已在别处修改，刷新后再调整');
+        for (const move of moves) {
+          const pos = move.get(docs[move.file]);
+          need(pos?.[move.xKey] === move.x && pos?.[move.yKey] === move.y, '相关事件的位置已在别处修改，刷新后再调整');
+          pos[move.xKey] = move.nx;
+          pos[move.yKey] = move.ny;
+        }
+        const terrain = terrainOf(current);
+        if (terrain.length) current.note = Effects.writeTerrain(current.note, width,
+          Maps.resizeData(terrain, current.width, current.height, width, height, left, top, 1));
+        current.data = Maps.resizeData(current.data || [], current.width, current.height, width, height, left, top);
+        current.width = width;
+        current.height = height;
+      });
+      const system = project.sys();
+      return { width, height, start: { map: Number(system.startMapId) || 0, x: Number(system.startX) || 0, y: Number(system.startY) || 0 } };
     },
     'map/create'(T, b) {
       const name = String(b.name || '').trim().slice(0, 40);
