@@ -13,6 +13,7 @@ const path = require('path');
 const { need, UserError } = require('../lib/util.js');
 const { writeZip } = require('../core/zip.js');
 const Blank = require('../core/blank.js');
+const mapEffects = require('../core/map-effects.js');
 
 module.exports = function (ctx) {
   const reg = ctx.registry;
@@ -31,7 +32,7 @@ module.exports = function (ctx) {
       }),
     };
   };
-  // 导入以后改过的文件（data / img / audio / js/plugins.js），按修改时间
+  // 导入以后改过的数据、素材和工具生成的运行插件，按修改时间
   function changedFiles(p) {
     const since = p.addedAt || 0;   // 解压 / 复制都在登记之前做完，之后改的才算
     const out = [];
@@ -45,7 +46,12 @@ module.exports = function (ctx) {
       }
     };
     for (const sub of ['data', 'www/data', 'img', 'www/img', 'audio', 'www/audio', 'movies', 'www/movies']) walk(path.join(p.gameDir, sub), sub);
-    for (const f of ['js/plugins.js', 'www/js/plugins.js']) { const full = path.join(p.gameDir, f); try { if (fs.statSync(full).mtimeMs > since) out.push({ file: full, name: f }); } catch { } }
+    for (const rel of ['js/plugins.js', mapEffects.PLUGIN_FILE]) {
+      for (const f of [rel, 'www/' + rel]) {
+        const full = path.join(p.gameDir, f);
+        try { if (fs.statSync(full).mtimeMs > since) out.push({ file: full, name: f }); } catch { }
+      }
+    }
     return out;
   }
   return {

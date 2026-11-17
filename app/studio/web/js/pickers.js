@@ -15,6 +15,33 @@ function pictureFolders(names) {
   return [...folders].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
+function weatherDialog(initial) {
+  const weather = { rain: '雨', storm: '暴雨', snow: '雪', none: '清除天气' };
+  return openDialog(`<header><h3>${initial ? '修改天气' : '插入天气'}</h3></header>
+    <div class="dbody"><div class="fgrid">
+      <label for="weatherType">天气</label><select id="weatherType">${Object.entries(weather).map(([key, label]) => `<option value="${key}" ${initial?.weather === key ? 'selected' : ''}>${label}</option>`).join('')}</select>
+      <label for="weatherPower" data-weather-power>强度</label><input id="weatherPower" data-weather-power type="number" min="1" max="9" step="1" value="${initial?.weather !== 'none' && initial?.power != null ? initial.power : 5}">
+      <label for="weatherSeconds">过渡秒数</label><input id="weatherSeconds" type="number" min="0" step="any" value="${initial?.sec ?? 1}">
+    </div><label class="switch"><input id="weatherWait" type="checkbox" ${initial?.wait ? 'checked' : ''}><span>等天气过渡完成再继续</span></label>
+    <div id="weatherError" role="alert"></div></div>
+    <footer><span class="sp"></span><button type="button" data-x>取消</button><button type="button" class="primary" data-ok>${initial ? '确定' : '插入'}</button></footer>`, (d, done) => {
+    const type = $('#weatherType', d), strength = $('#weatherPower', d), seconds = $('#weatherSeconds', d), wait = $('#weatherWait', d);
+    const sync = () => $$('[data-weather-power]', d).forEach(el => el.hidden = type.value === 'none');
+    type.onchange = sync;
+    sync();
+    $('[data-x]', d).onclick = () => done(null);
+    $('[data-ok]', d).onclick = () => {
+      const none = type.value === 'none', power = none ? 0 : strength.valueAsNumber;
+      const frames = Math.round(seconds.valueAsNumber * 60);
+      if (!Number.isInteger(power) || (!none && (power < 1 || power > 9)) || !Number.isSafeInteger(frames) || seconds.valueAsNumber < 0) {
+        $('#weatherError', d).innerHTML = '<div class="err">强度填 1 到 9 的整数，过渡秒数填 0 或正数。</div>';
+        return;
+      }
+      done('#天气 ' + (none ? '无' : weather[type.value]) + ' ' + power + ' ' + (Math.round(frames / 60 * 100) / 100) + '秒' + (wait.checked ? ' 等完' : ''));
+    };
+  });
+}
+
 // 新建场景和改台词共用一套选图，插入时保留图片的完整相对路径。
 function mountPicturePicker(box, names, onPick) {
   const rank = n => n.startsWith('导入/') ? 0 : n.includes('/') ? 2 : 1;

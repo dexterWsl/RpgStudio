@@ -17,7 +17,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
-const { createProject } = require('./core/project.js');
+const { createProject, defaultDataDir } = require('./core/project.js');
 const { createRegistry } = require('./core/projects.js');
 const { createSettings } = require('./core/settings.js');
 const { createTools } = require('./core/tools.js');
@@ -92,13 +92,17 @@ function createStudio(opts) {
 
   // ---------- 试玩：/play/<工程编号>/ 直接在浏览器里跑当前游戏 ----------
   const playId = () => { const c = curProject(); return c ? c.id : 'main'; };
-  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId });
+  const workDataDir = () => {
+    const dir = project.dataDir();
+    return path.relative(defaultDataDir(project.gameDir()), dir) ? dir : '';
+  };
+  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId, workDataDir });
 
   // ---------- 各功能模块 ----------
   const ctx = {
     opts, project, tools, where, hint, settings, saveSettings, profile, picOptions, canConfigure,
     firstLine, lineCount, uploadRoot, encryptUploads, assetBackupDir, backupsDir, saveUpload, maxUpload,
-    registry, curProject, isBuiltin, projectKey, playId,
+    registry, curProject, isBuiltin, projectKey, playId, workDataDir,
     at: createAt(project),
     views: {},      // 模块之间互相用的视图：eventView / mapView / personView / checkImage …
     actions: {},    // 全部 POST 动作（gallery/room 会调用 map/create 之类）

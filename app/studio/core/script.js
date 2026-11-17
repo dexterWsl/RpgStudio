@@ -300,8 +300,8 @@ function createScript(project, opts = {}) {
       }
       const cam = /^[#＃]\s*镜头[\s:：]+(上|下|左|右)\s*(\d{1,3})(?:\s+([1-6]))?$/.exec(line);
       if (cam) return { type: 'camera', dir: DIRS[cam[1]], dist: Number(cam[2]), speed: cam[3] ? Number(cam[3]) : 3 };
-      const we = /^[#＃]\s*天气[\s:：]+(无|晴|雨|暴雨|雪)(?:\s+([1-9]))?(?:\s+(\d+(?:\.\d+)?)\s*秒?)?$/.exec(line);
-      if (we) { const t = WEATHERS[we[1]]; return { type: 'weather', weather: t, power: we[2] ? Number(we[2]) : (t === 'none' ? 0 : 5), sec: we[3] != null ? Number(we[3]) : 1 }; }
+      const we = /^[#＃]\s*天气[\s:：]+(无|晴|雨|暴雨|雪)(?:\s+([0-9]))?(?:\s+(\d+(?:\.\d+)?)\s*秒?)?(?:\s+(等完))?$/.exec(line);
+      if (we) { const t = WEATHERS[we[1]]; return { type: 'weather', weather: t, power: we[2] == null ? (t === 'none' ? 0 : 5) : Number(we[2]), sec: we[3] == null ? 1 : Number(we[3]), wait: !!we[4] }; }
       const fs_ = /^[#＃]\s*闪光(?:[\s:：]+(白|红))?(?:\s+(\d+(?:\.\d+)?)\s*秒?)?$/.exec(line);
       if (fs_) return { type: 'flash', color: fs_[1] || '白', sec: fs_[2] != null ? Number(fs_[2]) : 0.5 };
       const narr = /^[：:](.*)$/.exec(line);
@@ -461,7 +461,7 @@ function createScript(project, opts = {}) {
       case 'title': return [{ code: 354, indent: 0, parameters: [] }];
       case 'plugin': return pa ? pa.commandsOf(it) : null;
       case 'camera': return [{ code: 204, indent: 0, parameters: [it.dir, Math.max(1, it.dist), it.speed, true] }];
-      case 'weather': return [{ code: 236, indent: 0, parameters: [it.weather, it.power, Math.max(0, Math.round(it.sec * 60)), false] }];
+      case 'weather': return [{ code: 236, indent: 0, parameters: [it.weather, it.power, Math.max(0, Math.round(it.sec * 60)), !!it.wait] }];
       case 'flash': return [{ code: 224, indent: 0, parameters: [FLASHES[it.color].slice(), Math.max(1, Math.round(it.sec * 60)), false] }];
       case 'float': {
         if (!it.text) throw new Error('「#飘字」后面要写飘的字');
@@ -559,11 +559,11 @@ function createScript(project, opts = {}) {
       case 204: return DIR_TEXT[p[0]] && p[3] ? '#镜头 ' + DIR_TEXT[p[0]] + ' ' + p[1] + (Number(p[2]) === 3 ? '' : ' ' + p[2]) : '';
       case 236: {
         const t = WEATHER_TEXT[p[0]];
-        if (!t || p[3]) return '';
+        if (!t) return '';
         const defPow = p[0] === 'none' ? 0 : 5;
         const sec = Number(p[2]) === 60 ? '' : ' ' + secText(p[2]);
         // 写了秒就得把强度也写上（不然秒会被当成强度）
-        return '#天气 ' + t + (Number(p[1]) !== defPow || sec ? ' ' + p[1] : '') + sec;
+        return '#天气 ' + t + (Number(p[1]) !== defPow || sec ? ' ' + p[1] : '') + (sec ? sec + '秒' : '') + (p[3] ? ' 等完' : '');
       }
       case 224: { const n = flashName(p[0]); return n && !p[2] ? '#闪光' + (n === '白' && Number(p[1]) === 30 ? '' : ' ' + n + (Number(p[1]) === 30 ? '' : ' ' + secText(p[1]))) : ''; }
       case 356: return stageLine(c);

@@ -8,6 +8,7 @@
 //   存档在浏览器里（IndexedDB），跟游戏文件夹里的 save/ 不是一份。
 const fs = require('fs');
 const path = require('path');
+const mapEffects = require('./map-effects.js');
 
 const PLUGIN = 'RpgStudio_Playtest';
 const MIME = {
@@ -72,15 +73,20 @@ function createPlaytest(o) {
     try { rel = decodeURIComponent(m[2].slice(1)) || 'index.html'; } catch { return send(400, 'text/plain; charset=utf-8', '地址不对'); }
     const root = path.resolve(o.root());
     if (rel === 'js/plugins/' + PLUGIN + '.js') return send(200, MIME['.js'], pluginSource());
-    const file = path.resolve(root, rel);
-    if (!file.startsWith(root + path.sep) || /(^|[\\/])(save|backups?|\.git)([\\/]|$)/i.test(path.relative(root, file))) return send(404, 'text/plain; charset=utf-8', '没有这个文件');
+    const workDataDir = o.workDataDir && o.workDataDir();
+    if (workDataDir && rel === mapEffects.PLUGIN_FILE) return send(200, MIME['.js'], fs.readFileSync(mapEffects.SOURCE, 'utf8'));
+    const workFile = workDataDir && /^data\/([\w]+\.json)$/.exec(rel);
+    const base = workFile ? workDataDir : root;
+    const file = path.resolve(base, workFile ? workFile[1] : rel);
+    if (!file.startsWith(base + path.sep) || /(^|[\\/])(save|backups?|\.git)([\\/]|$)/i.test(path.relative(base, file))) return send(404, 'text/plain; charset=utf-8', '没有这个文件');
     let st;
     try { st = fs.statSync(file); } catch { return send(404, 'text/plain; charset=utf-8', '没有这个文件：' + rel); }
     if (!st.isFile()) return send(404, 'text/plain; charset=utf-8', '没有这个文件');
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
     if (rel === 'js/plugins.js') {
       // 游戏自己的插件列表后面加上试玩插件（只在发出去的这一份里加，文件不动）
-      const src = fs.readFileSync(file, 'utf8');
+      let src = fs.readFileSync(file, 'utf8');
+      if (workDataDir) src += `\nif (!$plugins.some(p => p && p.name === "${mapEffects.PLUGIN}" && p.status)) $plugins.push({ name: "${mapEffects.PLUGIN}", status: true, description: "rpgStudio 地图效果", parameters: {} });\n`;
       return send(200, type, src + `\n$plugins.push({ name: "${PLUGIN}", status: true, description: "rpgStudio 试玩", parameters: {} });\n`);
     }
     // 视频要能拖进度条：支持 Range

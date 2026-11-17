@@ -394,6 +394,15 @@ function mountBlocks(host, ed) {
   async function editChip(i, el) {
     const r = rows[i], c = chip(r.inner);
     const replace = inner => { if (inner) setRow(i, inner); };
+    if (c.verb === '天气') {
+      try {
+        const parsed = await api('line/parse?text=' + enc(r.inner));
+        const weather = parsed.items?.[0];
+        if (weather?.type !== 'weather') { toast(parsed.error || '这行天气指令无法读取', true); return; }
+        replace(await weatherDialog(weather));
+      } catch (error) { toast(error.message, true); }
+      return;
+    }
     if (c.verb === '传送') {
       let item = null;
       try { const p = await api('line/parse?text=' + enc(r.inner)); item = p.items && p.items[0]; if (p.error) toast(p.error, true); } catch (e) { toast(e.message, true); }

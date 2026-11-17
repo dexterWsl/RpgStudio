@@ -328,6 +328,7 @@ function editBox(box, pg, at) {
           <button class="small" id="insSwitch">开关</button>
           <button class="small" id="insItem">物品</button>
           <button class="small" id="insPic">图片</button>
+          <button class="small" id="insWeather" title="在剧情执行到这里时切换天气">天气</button>
           ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">扮演</button>' : ''}
           <button class="small" id="insFloat" title="字从人物头上飘起来">飘字</button>
           <button class="small" id="insAct" title="人物走几步、转身、冒气泡（移动路线）">动作</button>
@@ -378,7 +379,7 @@ function editBox(box, pg, at) {
       <tr><td>#震动 / #气泡 ！</td><td>画面震一下（可写强度 1~9）；主角头上冒气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz（后面写「本事件」= 这个事件头上）</td></tr>
       <tr><td>#飘字 林屿：真的是我的问题吗</td><td>字从这个人头上飘起来再淡掉，不挡剧情（连着写几句，前面的会被顶上去，像念头一个一个冒出来）；不写名字 = 主角；「画面：」= 画面中间随便一处。名字可以是主角、本事件、地图上事件的名字</td></tr>
       <tr><td>#动作 赵磊 转身 ！ 下2 等0.5</td><td>让人物动：上 下 左 右（上3）、前进 后退（前进3）、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、气泡 ！ ？ …；最后写「不等」= 不等他做完（两个人一起动）。走不过去的那步会跳过。<br>移动路线就是写这个：<span class="t-code">#动作 本事件 下3 左2</span> = 这个事件往下走三格、再往左走两格（走完才往下；加「不等」就不等）</td></tr>
-      <tr><td>#镜头 上 4 / #天气 雨 / #闪光</td><td>镜头往上平移 4 格（可写速度 1~6）；天气 雨 / 暴雨 / 雪 / 无（可写强度、秒）；画面闪一下（白 / 红）</td></tr>
+      <tr><td>#镜头 上 4 / #天气 雨 5 2秒 / #闪光</td><td>镜头往上平移 4 格（可写速度 1~6）；天气可选雨、暴雨、雪或无，末尾加「等完」会等待过渡；画面闪一下（白 / 红）</td></tr>
       <tr><td>■ 选项（N 个）：…</td><td>列出这里有哪些选项，一眼看全；只是看的，不用改，改字在下面的「■ 选了」行</td></tr>
       <tr><td>■ 选了「…」</td><td>选项：改「」里的字 = 改这个选项；照着写一行 = 加一个选项（放在「■ 选项结束」或「■ 按取消时」前面，最多 6 个），下面写它的台词；删掉这一行和它下面的内容 = 删掉这个选项</td></tr>
       <tr><td>选项条件</td><td>有的选项要满足条件才能选：在阅读视图里点「选了 …」旁边的「＋条件」，选「满足才能选（不然是灰的）」或「满足才显示」。存进选项文字里的是插件写法 <span class="t-code">&lt;&lt;[条件]&gt;&gt;</span>（条件成立时灰掉）/ <span class="t-code">(([条件]))</span>（条件成立时不显示），也可以直接在「■ 选了」行里改；游戏里没装 WD_ConditionalChoice 也能用（编辑器自带的演出插件会接手）</td></tr>
@@ -512,6 +513,7 @@ function editBox(box, pg, at) {
     } catch (e) { showMsg(`<div class="err">${esc(e.message)}</div>`); }
   };
   $('#insPic', box).onclick = async () => { const n = await pickDialog('插入图片', 'images?sub=pictures', true); if (n) insert('#图 ' + n); };
+  $('#insWeather', box).onclick = async () => { const line = await weatherDialog(); if (line) insert(line); };
   $('#insSay', box).onclick = async () => { const n = await pickDialog('插入人物', 'lookup?kind=actor'); if (n) insert(n + '：'); };
   $('#insChoice', box).onclick = async () => { const t = await choiceBuilder(); if (t) insert(t); };
   $('#insIf', box).onclick = async () => { const c = await ifBuilder(); if (c) insert('#如果 ' + c + '\n#结束'); };

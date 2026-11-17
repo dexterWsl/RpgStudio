@@ -1,8 +1,11 @@
 'use strict';
-// 地图：渲染（照 MZ 引擎）、事件层、图块 / 区域编辑、调色板、地图属性 / 新建 / 复制 / 删除
-// ---------- 地图 ----------
-// 三种模式：事件（看 / 拖动 / 新建事件）、图块（画地图）、区域（刷区域编号）
+// 地图：渲染（照 MZ 引擎）、事件、图块、区域、高低差和天气
 const TM = window.Tilemap;
+const FX = window.RpgStudioMapEffects;
+const HEIGHT_LAYER = 6; // 编辑器临时层，保存时和 RPG Maker 的六层图块分开
+const STAIRS = [[0, '清除'], [8, '↑'], [6, '→'], [2, '↓'], [4, '←']];
+const STAIR_LABELS = { 0: '无', 8: '向上', 6: '向右', 2: '向下', 4: '向左' };
+const WEATHER_LABELS = { inherit: '沿用当前天气', none: '无天气效果', rain: '雨', storm: '暴雨', snow: '雪' };
 const charCache = new Map();
 function loadSheet(name) {
   if (!charCache.has(name)) charCache.set(name, new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = img('characters', name); }));
@@ -44,12 +47,13 @@ async function viewMap(main, id, mode, opts = {}) {
   const w = m.width, h = m.height;
   const data = tiles.data.slice(0, w * h * 6);
   while (data.length < w * h * 6) data.push(0);
+  const terrain = tiles.terrain.length ? tiles.terrain : new Array(w * h).fill(0);
   ME = {
-    id, m, w, h, data, sheets, hash: tiles.hash, missing: tiles.missing || [], tileset: tiles.tileset,
+    id, m, w, h, data: data.concat(terrain), sheets, hash: tiles.hash, missing: tiles.missing || [], tileset: tiles.tileset, scrollType: tiles.scrollType,
     flags: (tiles.tileset && tiles.tileset.flags) || [],
     hasTiles: sheets.some(Boolean),
-    mode: ['tiles', 'regions'].includes(mode) ? mode : 'events',
-    tool: 'pen', layer: -1, region: 1, tab: null,
+    mode: ['tiles', 'regions', 'height'].includes(mode) ? mode : 'events',
+    tool: 'pen', layer: -1, region: 1, heightValue: 1, stair: 8, heightBrush: 'level', tab: null,
     sel: { w: 1, h: 1, ids: [[0]] }, selRect: null,
     undo: [], redo: [], seq: 0, savedTop: 0,
     C: Math.max(8, Math.min(48, Math.floor(4096 / Math.max(w, h)))),
@@ -75,15 +79,16 @@ async function viewMap(main, id, mode, opts = {}) {
     <div class="titlebar"><h1><span class="id num">地图 ${m.id}</span>${esc(m.name)}</h1>${m.displayName ? `<span class="tag">显示名：${esc(m.displayName)}</span>` : ''}
       <span class="sp"></span>
       <button class="small" id="mapPlay" title="跳过标题，直接从这张地图开始（开始地图就站在开始位置，别的地图找一格能站的）">▶ 在这里试玩</button>
+      <button class="small" id="mapWeather">天气</button>
       <button class="small" id="mapProps">地图属性</button>
       ${moreMenu([{ id: 'mapChild', label: '新建子地图' }, { id: 'mapCopy', label: '复制这张地图' }, { id: 'mapDel', label: '删除这张地图', danger: true }])}
     </div>
-    <div class="meta"><span class="num">${w} × ${h}</span><span>${esc(m.tileset)}</span>${m.bgm ? `<span>BGM：${esc(m.bgm)}</span>` : ''}${m.parallax ? `<span>远景：${esc(m.parallax)}</span>` : ''}<span>${m.events.length} 个事件</span></div>
+    <div class="meta"><span class="num">${w} × ${h}</span><span>${esc(m.tileset)}</span>${m.bgm ? `<span>BGM：${esc(m.bgm)}</span>` : ''}${m.parallax ? `<span>远景：${esc(m.parallax)}</span>` : ''}<span id="mapWeatherLabel" ${m.weather.type === 'inherit' ? 'hidden' : ''}>进图天气：${WEATHER_LABELS[m.weather.type]}</span><span>${m.events.length} 个事件</span></div>
     ${ME.missing.length ? `<div class="warnline">图块集里有 ${ME.missing.length} 张图在 img/tilesets 里找不到：${ME.missing.map(esc).join('、')}。用到它们的格子会是空的。</div>` : ''}
-    ${!ME.hasTiles ? `<div class="warnline">这张地图的图块集没有可用的图片，只能编辑事件和区域。</div>` : ''}
+    ${!ME.hasTiles ? `<div class="warnline">这张地图的图块集没有可用的图片。</div>` : ''}
     <div class="maptop">
       <div class="seg" id="mmode" role="tablist">
-        <button data-mode="events">事件</button><button data-mode="tiles" ${ME.hasTiles ? '' : 'disabled'}>图块</button><button data-mode="regions">区域</button>
+        <button data-mode="events">事件</button><button data-mode="tiles" ${ME.hasTiles ? '' : 'disabled'}>图块</button><button data-mode="regions">区域</button><button data-mode="height">高低差</button>
       </div>
       <span class="dim" id="modeHint"></span>
       <span class="stagenote" id="stageNote" hidden></span>
@@ -111,6 +116,7 @@ async function viewMap(main, id, mode, opts = {}) {
   $('#gridToggle').onchange = e => { ME.grid = e.target.checked; try { localStorage.setItem('studio.grid', ME.grid ? '1' : '0'); } catch { } drawOverlay(); };
   $('#lblToggle').onchange = e => { S.labels = e.target.checked; remember(); $('#board').classList.toggle('labels', S.labels); };
   $('#mapProps').onclick = () => mapPropsDialog();
+  $('#mapWeather').onclick = () => mapWeatherDialog();
   bindMenu(main);
   $('#mapChild').onclick = () => newMapDialog(id);
   $('#mapPlay').onclick = () => { const st = S.project.start || {}; playGame(st.map === id ? { map: id, x: st.x, y: st.y } : { map: id, x: -1, y: -1 }); };
@@ -144,6 +150,14 @@ async function mountBoard(plx, w, h) {
 
 // ---------- 画 ----------
 const idx = (z, x, y) => (z * ME.h + y) * ME.w + x;
+const heightCell = (x, y) => ME.data[idx(HEIGHT_LAYER, x, y)];
+const heightColor = (level, alpha) => level ? `hsla(${205 - level * 17}, 85%, 55%, ${alpha})` : `rgba(128, 152, 181, ${alpha})`;
+const HEIGHT_EDGES = [[8, 0, -1], [6, 1, 0], [2, 0, 1], [4, -1, 0]];
+function heightNeighbor(x, y) {
+  if (ME.scrollType & 2) x = (x + ME.w) % ME.w;
+  if (ME.scrollType & 1) y = (y + ME.h) % ME.h;
+  return inMap({ x, y }) ? y * ME.w + x : -1;
+}
 // 一格的画法和游戏一样（TM.drawSpot = 引擎的 Tilemap._addSpot）：远景在最底下，☆ 图块在最上面，桌子下面一格有桌沿
 function drawCell(x, y) {
   const { ctx, C } = ME;
@@ -164,14 +178,44 @@ function drawOverCell(x, y) {
       if (C >= 24) { o.fillStyle = '#fff'; o.font = `600 ${Math.round(C * 0.38)}px sans-serif`; o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillText(String(r), dx + C / 2, dy + C / 2 + 1); }
     }
   }
-  if (ME.grid || ME.mode === 'regions' || !ME.hasTiles) { o.strokeStyle = 'rgba(255,255,255,.12)'; o.lineWidth = 1; o.strokeRect(dx + 0.5, dy + 0.5, C - 1, C - 1); }
+  if (ME.mode === 'height') {
+    const cell = heightCell(x, y), level = FX.level(cell), stair = FX.direction(cell);
+    if (level) { o.fillStyle = heightColor(level, 0.48); o.fillRect(dx, dy, C, C); }
+    let arrowOk = false;
+    for (const [d, ax, ay] of HEIGHT_EDGES) {
+      const neighborIdx = heightNeighbor(x + ax, y + ay);
+      if (neighborIdx < 0) continue;
+      const neighbor = ME.data[HEIGHT_LAYER * ME.w * ME.h + neighborIdx];
+      if (d === stair) arrowOk = FX.level(neighbor) > level && FX.edgePassable(cell, neighbor, d);
+      if (FX.level(neighbor) > level && !FX.edgePassable(cell, neighbor, d)) {
+        o.fillStyle = 'rgba(8, 13, 20, .82)';
+        const edge = Math.max(2, Math.floor(C / 12));
+        o.fillRect(dx + (ax > 0 ? C - edge : 0), dy + (ay > 0 ? C - edge : 0), ax ? edge : C, ay ? edge : C);
+      }
+    }
+    if ((level || stair) && C >= 14) {
+      o.fillStyle = stair && !arrowOk ? '#ffb4a9' : '#fff';
+      o.font = `700 ${Math.round(C * .42)}px sans-serif`; o.textAlign = 'center'; o.textBaseline = 'middle';
+      o.fillText(`${level}${stair ? STAIRS.find(s => s[0] === stair)[1] : ''}`, dx + C / 2, dy + C / 2 + 1);
+    }
+  }
+  if (ME.grid || ME.mode === 'regions' || ME.mode === 'height' || !ME.hasTiles) { o.strokeStyle = 'rgba(255,255,255,.12)'; o.lineWidth = 1; o.strokeRect(dx + 0.5, dy + 0.5, C - 1, C - 1); }
 }
 function drawAllCells() { for (let y = 0; y < ME.h; y++) for (let x = 0; x < ME.w; x++) drawCell(x, y); drawOverlay(); }
 function drawOverlay() { ME.octx.clearRect(0, 0, ME.w * ME.C, ME.h * ME.C); for (let y = 0; y < ME.h; y++) for (let x = 0; x < ME.w; x++) drawOverCell(x, y); }
 function redrawIdx(list) {
   const n = ME.w * ME.h, done = new Set();
   const one = c => { if (done.has(c)) return; done.add(c); const x = c % ME.w, y = Math.floor(c / ME.w); drawCell(x, y); drawOverCell(x, y); };
-  for (const i of list) { const c = i % n; one(c); if (c + ME.w < n) one(c + ME.w); }
+  for (const i of list) {
+    const c = i % n;
+    one(c);
+    if (c + ME.w < n) one(c + ME.w);
+    if (ME.mode !== 'height') continue;
+    for (const [, ax, ay] of HEIGHT_EDGES) {
+      const neighbor = heightNeighbor(c % ME.w + ax, Math.floor(c / ME.w) + ay);
+      if (neighbor >= 0) one(neighbor);
+    }
+  }
 }
 
 function setZoom(D) {
@@ -316,6 +360,7 @@ function setMapMode(mode, first) {
   $('#board').className = 'board mode-' + mode + (S.labels ? ' labels' : '') + (ME.hasTiles ? ' tiled' : '');
   if ($('#modeHint')) $('#modeHint').textContent = mode === 'events' ? '点事件打开，拖动换位置，点空格子新建事件'
     : mode === 'tiles' ? '左键画，右键吸取；B 铅笔 R 矩形 G 油漆桶 E 橡皮 I 吸管；Ctrl+Z 撤销，Ctrl+S 保存'
+    : mode === 'height' ? '给地面分层，用台阶连接相差一级的格子'
     : '区域编号给插件和遇敌用；左键刷，右键吸取';
   $('#palette').classList.toggle('hidden', mode === 'events');
   if (ME.tool === 'eraser' && mode === 'events') ME.tool = 'pen';
@@ -353,8 +398,8 @@ function bindTools() {
 const topId = () => (ME.undo.length ? ME.undo[ME.undo.length - 1].id : 0);
 function updateDirty() {
   S.dirty = topId() !== ME.savedTop;
-  if ($('#saveB')) { $('#saveB').disabled = !S.dirty; $('#discardB').disabled = !S.dirty; }
-  if ($('#dirtyNote')) $('#dirtyNote').textContent = S.dirty ? `有 ${ME.undo.length} 步没保存` : '';
+  if ($('#saveB')) { $('#saveB').disabled = !S.dirty || ME.saving; $('#discardB').disabled = !S.dirty || ME.saving; }
+  if ($('#dirtyNote')) $('#dirtyNote').textContent = S.dirty ? '有未保存的修改' : '';
   if ($('#undoB')) { $('#undoB').disabled = !ME.undo.length; $('#redoB').disabled = !ME.redo.length; }
 }
 
@@ -362,6 +407,22 @@ function updateDirty() {
 function drawPalette() {
   const pal = $('#palette');
   if (ME.mode === 'events') { pal.innerHTML = ''; return; }
+  if (ME.mode === 'height') {
+    pal.innerHTML = `<div class="height-palette">
+      <div class="lbl">高度</div>
+      <div class="height-levels">${Array.from({ length: FX.MAX_LEVEL + 1 }, (_, n) => `<button type="button" data-height="${n}" aria-pressed="${ME.heightBrush === 'level' && ME.heightValue === n}" style="--height-color:${heightColor(n, .62)}">${n === 0 ? '0 地面' : n}</button>`).join('')}</div>
+      <div class="lbl">台阶朝向</div>
+      <div class="height-stairs">${STAIRS.map(([d, arrow]) => `<button type="button" data-stair="${d}" aria-pressed="${ME.heightBrush === 'stair' && ME.stair === d}" aria-label="${d ? STAIR_LABELS[d] + '上楼' : '清除台阶'}">${arrow}</button>`).join('')}</div>
+      <div class="dim">在低处画箭头，指向高一级的格子。两端图块都要能走。</div>
+    </div>`;
+    $$('[data-height], [data-stair]', pal).forEach(b => b.onclick = () => {
+      if (b.dataset.height !== undefined) { ME.heightBrush = 'level'; ME.heightValue = Number(b.dataset.height); }
+      else { ME.heightBrush = 'stair'; ME.stair = Number(b.dataset.stair); }
+      if (ME.tool === 'eraser' || ME.tool === 'pick') { ME.tool = 'pen'; drawTools(); }
+      drawPalette();
+    });
+    return;
+  }
   const P = 48;
   if (ME.mode === 'regions') {
     pal.innerHTML = `<div class="pscroll"><div class="pwrap"><canvas id="pcv"></canvas><div class="psel" id="psel"></div></div></div><div class="pinfo" id="pinfo"></div>`;
@@ -439,10 +500,16 @@ function commit(changes) {
 // 在 (x, y) 盖一个「章」：选中的图块块（橡皮 = 空），返回改动
 function stampAt(x, y, out, cells, pattern) {
   const sel = ME.sel;
-  if (ME.mode === 'regions') {
+  if (ME.mode === 'regions' || ME.mode === 'height') {
     if (!inMap({ x, y })) return;
-    const i = idx(5, x, y), v = ME.tool === 'eraser' ? 0 : ME.region;
-    if (ME.data[i] !== v) { out.push([i, ME.data[i], v]); ME.data[i] = v; cells.push([x, y]); }
+    const i = idx(ME.mode === 'regions' ? 5 : HEIGHT_LAYER, x, y), old = ME.data[i];
+    let v = 0;
+    if (ME.tool !== 'eraser') {
+      if (ME.mode === 'regions') v = ME.region;
+      else if (ME.heightBrush === 'level') v = FX.cell(ME.heightValue, FX.direction(old));
+      else v = FX.cell(FX.level(old), ME.stair);
+    }
+    if (old !== v) { out.push([i, old, v]); ME.data[i] = v; cells.push([x, y]); }
     return;
   }
   const w = pattern ? 1 : sel.w, h = pattern ? 1 : sel.h;
@@ -462,6 +529,7 @@ function finishStamp(out, cells) {
 function floodCells(x0, y0) {
   const key = (x, y) => {
     if (ME.mode === 'regions') return ME.data[idx(5, x, y)];
+    if (ME.mode === 'height') return ME.heightBrush === 'level' ? FX.level(heightCell(x, y)) : FX.direction(heightCell(x, y));
     const k = v => (TM.isAuto(v) ? 'k' + TM.kindOf(v) : String(v));
     if (ME.layer >= 0) return k(ME.data[idx(ME.layer, x, y)]);
     const first = ME.sel.ids[0][0];
@@ -484,6 +552,13 @@ function floodCells(x0, y0) {
 }
 function pickAt(p) {
   if (ME.mode === 'regions') { ME.region = ME.data[idx(5, p.x, p.y)]; drawPalette(); toast(ME.region ? '已吸取区域 ' + ME.region : '这一格没有区域'); return; }
+  if (ME.mode === 'height') {
+    const cell = heightCell(p.x, p.y);
+    ME.heightValue = FX.level(cell); ME.stair = FX.direction(cell);
+    if (ME.tool === 'pick' || ME.tool === 'eraser') { ME.tool = 'pen'; drawTools(); }
+    drawPalette();
+    return;
+  }
   const id = ME.layer >= 0 ? ME.data[idx(ME.layer, p.x, p.y)] : TM.topTile(ME.data, ME.w, ME.h, p.x, p.y);
   selectTile(id);
   if (ME.tool === 'pick' || ME.tool === 'eraser') { ME.tool = 'pen'; drawTools(); }
@@ -527,7 +602,7 @@ function bindStage() {
     if (drag && drag.rect) { drag.b = p; showRectBox(drag); return; }
     if (drag && drag.pen) { penTo(drag, p); return; }
     if (ME.mode === 'events') { showBox(eventAt(p) ? null : p.x, p.y, 1, 1, 'drop'); return; }
-    const one = ME.mode === 'regions' || ME.tool === 'fill' || ME.tool === 'pick';
+    const one = ME.mode !== 'tiles' || ME.tool === 'fill' || ME.tool === 'pick';
     showBox(p.x, p.y, one ? 1 : ME.sel.w, one ? 1 : ME.sel.h, ME.tool === 'eraser' ? 'erase' : '');
   };
   hit.onpointerup = ev => {
@@ -542,6 +617,11 @@ function bindStage() {
       finishStamp(out, cells); commit(out);
       showBox(null);
     }
+  };
+  hit.onlostpointercapture = () => {
+    if (drag && drag.pen) commit(drag.out);
+    drag = null;
+    showBox(null);
   };
   hit.onpointerleave = () => { if (!drag) showBox(null); };
   $('#board').onwheel = ev => { if (!(ev.ctrlKey || ev.metaKey)) return; ev.preventDefault(); zoomStep(ev.deltaY < 0 ? 1 : -1); };
@@ -567,6 +647,7 @@ function status(p) {
   const layers = [0, 1, 2, 3].map(z => ME.data[idx(z, p.x, p.y)]);
   s.innerHTML = `<span><b class="num">(${p.x}, ${p.y})</b></span>` +
     (ME.mode === 'tiles' ? layers.map((v, z) => v ? `<span>第 ${z + 1} 层：${esc(tileLabel(v))}</span>` : '').join('') : '') +
+    (ME.mode === 'height' ? `<span>高度 ${FX.level(heightCell(p.x, p.y))}</span><span>台阶 ${STAIR_LABELS[FX.direction(heightCell(p.x, p.y))]}</span>` : '') +
     `<span>区域 ${ME.data[idx(5, p.x, p.y)] || '无'}</span>` + (e ? `<span>事件 ${e.id}「${esc(e.name)}」</span>` : '');
 }
 function undo() {
@@ -580,13 +661,17 @@ function redo() {
   ME.undo.push(u); redrawIdx(u.ch.map(c => c[0])); updateDirty();
 }
 async function saveTiles() {
-  if (!S.dirty) return;
-  $('#saveB').disabled = true;
+  const editor = ME;
+  if (!S.dirty || editor.saving) return;
+  editor.saving = true;
+  const savedTop = topId(), end = editor.w * editor.h * HEIGHT_LAYER;
+  updateDirty();
   try {
-    const r = await api('map/tiles', { map: ME.id, data: ME.data, hash: ME.hash });
-    ME.hash = r.hash; ME.savedTop = topId(); updateDirty();
+    const r = await api('map/tiles', { map: editor.id, data: editor.data.slice(0, end), terrain: editor.data.slice(end), hash: editor.hash });
+    editor.hash = r.hash; editor.savedTop = savedTop;
     toast('已保存地图');
-  } catch (e) { toast(e.message, true); updateDirty(); }
+  } catch (e) { toast(e.message, true); }
+  finally { editor.saving = false; if (ME === editor && $('#saveB')) updateDirty(); }
 }
 document.addEventListener('keydown', e => {
   if (!ME || route().name !== 'map' || !$('#stage') || $('#dlg').open) return;
@@ -646,13 +731,90 @@ function drawEventTable() {
   $$('tr[data-ev]', box).forEach(tr => tr.onclick = () => { location.hash = `#/event/${ME.id}/${tr.dataset.ev}/0`; });
 }
 
+// ---------- 天气 ----------
+async function mapWeatherDialog() {
+  const editor = ME, previous = editor.m.weather;
+  let stopPreview;
+  try {
+    await openDialog(`<header><h3>地图天气</h3></header>
+      <div class="dbody"><div class="fgrid">
+        <label for="mw_type">进图天气</label><select id="mw_type">${FX.WEATHER_TYPES.map(type => `<option value="${type}" ${type === previous.type ? 'selected' : ''}>${WEATHER_LABELS[type]}</option>`).join('')}</select>
+        <label for="mw_power">强度</label><div class="weather-power"><input id="mw_power" type="range" min="1" max="9" value="${previous.power}"><output for="mw_power" class="num">${previous.power}</output></div>
+        <label for="mw_time">过渡（秒）</label><input id="mw_time" type="number" min="0" max="10" step="0.1" value="${previous.frames / 60}">
+      </div>
+      <canvas class="weather-preview" width="560" height="220" aria-label="天气预览"></canvas>
+      <div class="fnote">从其他地图进入时应用。剧情途中可用事件的「天气」指令切换。</div><div id="mw_error" role="alert"></div></div>
+      <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>保存天气</button></footer>`,
+    (d, done) => {
+      const type = $('#mw_type', d), power = $('#mw_power', d), time = $('#mw_time', d);
+      const save = $('[data-ok]', d);
+      const sync = () => {
+        power.disabled = type.value === 'inherit' || type.value === 'none';
+        time.disabled = type.value === 'inherit';
+        $('output', d).value = power.disabled ? '—' : power.value;
+      };
+      type.onchange = power.oninput = sync;
+      sync();
+      stopPreview = previewMapWeather($('.weather-preview', d), editor.ctx.canvas, type, power);
+      $('[data-x]', d).onclick = () => done(null);
+      save.onclick = async () => {
+        const seconds = time.disabled ? 1 : time.valueAsNumber;
+        if (!(seconds >= 0 && seconds <= 10)) { $('#mw_error', d).textContent = '过渡时间要在 0~10 秒之间'; return; }
+        save.disabled = true;
+        try {
+          const r = await api('map/weather', { map: editor.id, previous, weather: { type: type.value, power: Number(power.value), frames: Math.round(seconds * 60) } });
+          editor.m.weather = r.weather;
+          const label = ME === editor && $('#mapWeatherLabel');
+          if (label) {
+            label.hidden = r.weather.type === 'inherit';
+            label.textContent = '进图天气：' + WEATHER_LABELS[r.weather.type];
+          }
+          toast('已保存地图天气'); done(true);
+        } catch (e) { $('#mw_error', d).textContent = e.message; }
+        finally { save.disabled = false; }
+      };
+    });
+  } finally { if (stopPreview) stopPreview(); }
+}
+
+function previewMapWeather(canvas, source, type, power) {
+  const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+  const cropW = Math.min(source.width, source.height * w / h), cropH = cropW * h / w;
+  const particles = Array.from({ length: 144 }, () => [Math.random(), Math.random(), .6 + Math.random() * .8]);
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let frame;
+  function draw(now) {
+    const weather = type.value, strength = Number(power.value), t = reduced ? 0 : now / 1000;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(source, (source.width - cropW) / 2, (source.height - cropH) / 2, cropW, cropH, 0, 0, w, h);
+    if (weather === 'rain' || weather === 'storm' || weather === 'snow') {
+      const snow = weather === 'snow', storm = weather === 'storm';
+      ctx.fillStyle = `rgba(12, 21, 38, ${(snow ? .015 : .029) * strength})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = ctx.strokeStyle = snow ? 'rgba(255,255,255,.78)' : 'rgba(210,233,255,.63)';
+      ctx.lineWidth = storm ? 1.8 : 1;
+      ctx.beginPath();
+      for (const [x0, y0, speed] of particles.slice(0, strength * 16)) {
+        const y = (y0 * h + t * speed * (snow ? 45 : storm ? 570 : 420)) % h;
+        const x = (x0 * w + t * speed * (snow ? 18 : storm ? 176 : 74)) % w;
+        if (snow) { ctx.moveTo(x + 2 * speed, y); ctx.arc(x, y, 2 * speed, 0, Math.PI * 2); }
+        else { ctx.moveTo(x, y); ctx.lineTo(x + (storm ? 12 : 4) * speed, y + (storm ? 36 : 19) * speed); }
+      }
+      if (snow) ctx.fill(); else ctx.stroke();
+    }
+    frame = requestAnimationFrame(draw);
+  }
+  draw(performance.now());
+  return () => cancelAnimationFrame(frame);
+}
+
 // ---------- 地图属性 / 新建 / 复制 / 删除 ----------
 async function tilesetOptions(sel) {
   const r = await api('tilesets');
   return r.tilesets.map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${t.id} ${esc(t.name)}${t.names ? '' : '（没有图）'}</option>`).join('');
 }
 async function mapPropsDialog() {
-  if (S.dirty) { toast('先保存或放弃图块的修改，再改地图属性', true); return; }
+  if (S.dirty) { toast('先保存或放弃地图修改，再改地图属性', true); return; }
   const p = ME.m.props;
   const opts = await tilesetOptions(p.tilesetId);
   const r = await openDialog(`<header><h3>地图 ${ME.id} 的属性</h3></header>
@@ -680,7 +842,7 @@ async function mapPropsDialog() {
   if (r) { toast('已保存地图属性'); await refreshMaps(); render(); }
 }
 async function newMapDialog(parentId) {
-  if (S.dirty && !confirm('图块的修改还没保存，确定继续？')) return;
+  if (S.dirty && !confirm('地图的修改还没保存，确定继续？')) return;
   const parent = S.maps.find(m => m.id === parentId);
   let tsId = 1;
   if (parentId && ME && ME.id === parentId) tsId = ME.m.props.tilesetId;
@@ -703,8 +865,8 @@ async function newMapDialog(parentId) {
   if (r) { S.dirty = false; toast('已新建地图 ' + r); if (parentId) S.open.add(parentId); remember(); await refreshMaps(); location.hash = `#/map/${r}/tiles`; }
 }
 async function copyMap() {
-  if (S.dirty) { toast('先保存或放弃图块的修改', true); return; }
-  const name = await promptDialog('复制地图', '新地图的名字（图块、事件都会复制过去）', ME.m.name + ' 副本');
+  if (S.dirty) { toast('先保存或放弃地图修改', true); return; }
+  const name = await promptDialog('复制地图', '新地图的名字（图块、事件、高低差和天气会一起复制）', ME.m.name + ' 副本');
   if (!name) return;
   try { const r = await api('map/create', { name, parentId: ME.m.props.parentId, copyFrom: ME.id }); toast('已复制成地图 ' + r.id); await refreshMaps(); location.hash = '#/map/' + r.id; }
   catch (e) { toast(e.message, true); }
