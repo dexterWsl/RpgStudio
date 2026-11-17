@@ -6,6 +6,7 @@ const { need, int, clone, END, blankPage, UserError } = require('../lib/util.js'
 const { TRIGGERS, PRIORITIES, CE_TRIGGERS } = require('../core/commands.js');
 const choicecond = require('../core/choicecond.js');
 const marks = require('../core/marks.js');
+const { isSettlement } = require('../core/settlements.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -59,7 +60,7 @@ module.exports = function (ctx) {
       id: c.id, name: String(c.name || ''), trigger: c.trigger || 0, switchId: c.switchId || 0,
       triggerText: c.trigger ? `${CE_TRIGGERS[c.trigger]}（${project.label('switch', c.switchId)}）` : '',
       lines: ctx.lineCount(c.list), commands: Math.max(0, (c.list || []).length - 1),
-      calls: (calls[c.id] || {}).total || 0, hint: hint('ce:' + c.id),
+      calls: (calls[c.id] || {}).total || 0, hint: hint('ce:' + c.id), isSettlement: isSettlement(c),
     }));
   }
 
@@ -73,6 +74,7 @@ module.exports = function (ctx) {
     const at = target(b);
     const r = T.store.edit([fileOf(at)], docs => {
       const { holder } = locate(docs, at);
+      need(!(at.type === 'ce' && isSettlement(holder)), '请在结算组里编辑开关和变量');
       const list = holder.list || [END()];
       const al = T.merger.analyzeList(list, { baseIndent: 0 });
       if (!al.editable) throw new UserError('这一页不能用编辑框改：' + (al.reason || '结构复杂'));
@@ -102,6 +104,7 @@ module.exports = function (ctx) {
       triggerText: c.trigger ? `${CE_TRIGGERS[c.trigger]}（${project.label('switch', c.switchId)} 为开时）` : CE_TRIGGERS[0],
       hint: hint('ce:' + id),
       isScene: T.scenes.isMarked(c.list),
+      isSettlement: isSettlement(c),
       calledFrom: T.xref.of('ce', id).map(r => ({ ...r, where: where(r.at) })),
     });
   }
@@ -425,6 +428,7 @@ module.exports = function (ctx) {
       T.store.edit(['CommonEvents.json'], docs => {
         const c = docs['CommonEvents.json'][id];
         need(c, '公共事件不存在');
+        need(!isSettlement(c), '请在结算组里编辑');
         if (b.name != null) { const n = String(b.name).trim().slice(0, 40); need(n, '名字不能为空'); c.name = n; }
         if (b.trigger != null) { const t = int(b.trigger); need(t >= 0 && t <= 2, '触发方式不对'); c.trigger = t; }
         if (b.switchId != null) { const s = int(b.switchId); need(project.has('switch', s), '开关 ' + s + ' 超出范围'); c.switchId = s; }

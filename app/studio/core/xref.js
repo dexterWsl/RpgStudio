@@ -5,10 +5,13 @@
 //   位置 at：{ type:'map', map, ev, page } | { type:'ce', ce } | { type:'troop', troop, page }
 // 另外顺便做全文搜索（台词、选项、事件名、公共事件名、开关/变量名）
 
+const impact = require('./impact.js');
+const choicecond = require('./choicecond.js');
+
 const SCRIPT_REFS = [
-  [/\$gameSwitches\.(?:setValue|value)\(\s*(\d+)/g, 'switch'],
-  [/\$gameVariables\.(?:setValue|value)\(\s*(\d+)/g, 'var'],
-  [/\$gameTemp\.reserveCommonEvent\(\s*(\d+)/g, 'ce'],
+  [/\$gameSwitches\.(?:setValue|value)\(\s*(\d+)\s*[,)]/g, 'switch'],
+  [/\$gameVariables\.(?:setValue|value)\(\s*(\d+)\s*[,)]/g, 'var'],
+  [/\$gameTemp\.reserveCommonEvent\(\s*(\d+)\s*\)/g, 'ce'],
 ];
 
 const STR_KINDS = new Set(['picture', 'sprite', 'face']);
@@ -27,58 +30,119 @@ function createXref(project, describer) {
       }
     }
     for (const c of P.read('CommonEvents.json') || []) if (c) fn({ type: 'ce', ce: c.id }, c.list || [], null, c);
-    for (const t of P.read('Troops.json') || []) if (t) (t.pages || []).forEach((pg, pi) => fn({ type: 'troop', troop: t.id, page: pi }, pg.list || [], null, t));
+    for (const t of P.read('Troops.json') || []) if (t) (t.pages || []).forEach((pg, pi) => fn({ type: 'troop', troop: t.id, page: pi }, pg.list || [], pg.conditions, t));
   }
 
   function build() {
     const refs = [];
-    const add = (kind, id, use, at, line, text) => { if (STR_KINDS.has(kind) ? !!id : Number(id) > 0) refs.push({ kind, id: STR_KINDS.has(kind) ? String(id) : Number(id), use, at, line, text }); };
+    const add = (kind, id, use, at, line, text, rule) => { if (STR_KINDS.has(kind) ? !!id : Number(id) > 0) refs.push({ kind, id: STR_KINDS.has(kind) ? String(id) : Number(id), use, at, line, text, ...(rule ? { rule } : {}) }); };
     each((at, list, cond, owner) => {
+      function preview(start = 0, stop = list.length, indent = 0) {
+        const lines = [];
+        for (let i = start; i < stop && lines.length < 2; i++) {
+          const cmd = list[i];
+          if (cmd && cmd.indent === indent && ![0, 101, 108, 408, 411, 412, 404, 655].includes(cmd.code)) lines.push(describer.describe(cmd).slice(0, 90));
+        }
+        return lines;
+      }
+      function addRule(type, line, text, groups, details = {}) {
+        const rule = { type, groups, ...details };
+        for (const { kind, id } of impact.targets(groups)) add(kind, id, 'check', at, line, text, rule);
+      }
+      function moveRoute(route, line) {
+        for (const step of route?.list || []) {
+          const arg = step?.parameters?.[0];
+          if (step?.code === 27 || step?.code === 28) add('switch', arg, 'set', at, line, `移动路线 · 开关 ${step.code === 27 ? '开' : '关'}`);
+          if (step?.code === 45) scan(String(arg || ''), at, line, 'script');
+        }
+      }
       // 出现条件
-      if (cond) {
-        if (cond.switch1Valid) add('switch', cond.switch1Id, 'check', at, -1, '出现条件');
-        if (cond.switch2Valid) add('switch', cond.switch2Id, 'check', at, -1, '出现条件');
-        if (cond.variableValid) add('var', cond.variableId, 'check', at, -1, `出现条件：≥ ${cond.variableValue}`);
+      if (at.type === 'map' && (cond?.switch1Valid || cond?.switch2Valid || cond?.variableValid)) {
+        const pg = owner.pages[at.page];
+        addRule('page', -1, '出现条件 · ' + describer.pageConditions(cond).join(' 且 '), impact.pageTest(cond), { trigger: pg.trigger, preview: preview() });
+      }
+      if (at.type === 'map' && cond) {
         if (cond.itemValid) add('item', cond.itemId, 'check', at, -1, '出现条件');
         if (cond.actorValid) add('actor', cond.actorId, 'check', at, -1, '出现条件');
+      }
+      if (at.type === 'troop' && cond?.switchValid) {
+        const groups = [[impact.switchTest(cond.switchId)]];
+        if (cond.turnEnding || cond.turnValid || cond.enemyValid || cond.actorValid) groups[0].push(impact.unknownTest);
+        addRule('battle', -1, '敌群事件页条件 · ' + P.label('switch', cond.switchId) + ' 为开', groups, { preview: preview() });
       }
       // 事件图像（行走图）
       if (at.type === 'map') {
         const pg = (owner.pages || [])[at.page];
+        if (pg?.moveType === 3) moveRoute(pg.moveRoute, -1);
         const im = pg && pg.image;
         if (im && im.characterName) add('sprite', im.characterName + '#' + (im.characterIndex || 0), 'show', at, -1, '事件图像');
       }
-      if (at.type === 'ce' && owner.trigger > 0) add('switch', owner.switchId, 'check', at, -1, '触发开关（' + (owner.trigger === 1 ? '自动执行' : '并行处理') + '）');
+      if (at.type === 'ce' && owner.trigger > 0) addRule('common', -1, '触发开关（' + (owner.trigger === 1 ? '自动执行' : '并行处理') + '）', [[impact.switchTest(owner.switchId)]], { trigger: owner.trigger, preview: preview() });
       list.forEach((c, i) => {
         if (!c) return;
         const p = c.parameters || [];
         const t = () => describer.describe(c);
+        const readVars = (...ids) => { for (const id of new Set(ids)) add('var', id, 'check', at, i, t()); };
         switch (c.code) {
-          case 111:
-            if (p[0] === 0) add('switch', p[1], 'check', at, i, t());
-            else if (p[0] === 1) { add('var', p[1], 'check', at, i, t()); if (p[2] === 1) add('var', p[3], 'check', at, i, t()); }
-            else if (p[0] === 4) add('actor', p[1], 'check', at, i, t());
+          case 111: {
+            const groups = impact.commandTest(p, describer);
+            if (groups) {
+              let end = i + 1, otherwise = -1;
+              while (end < list.length && list[end]?.indent >= c.indent) {
+                if (list[end].indent === c.indent && list[end].code === 412) break;
+                if (list[end].indent === c.indent && list[end].code === 411) otherwise = end;
+                end++;
+              }
+              addRule('branch', i, t(), groups, { preview: preview(i + 1, otherwise < 0 ? end : otherwise, c.indent + 1), alternative: otherwise < 0 ? null : preview(otherwise + 1, end, c.indent + 1) });
+            } else if (p[0] === 4) add('actor', p[1], 'check', at, i, t());
             else if (p[0] === 8) add('item', p[1], 'check', at, i, t());
-            else if (p[0] === 12) scan(String(p[1] || ''), at, i, 'check');
+            else if (p[0] === 12) scan(String(p[1] || ''), at, i, 'script');
             break;
-          case 121: for (let k = p[0]; k <= p[1] && k - p[0] < 500; k++) add('switch', k, 'set', at, i, t()); break;
-          case 122:
-            for (let k = p[0]; k <= p[1] && k - p[0] < 500; k++) add('var', k, 'set', at, i, t());
+          }
+          case 121: case 122: {
+            const kind = c.code === 121 ? 'switch' : 'var', text = t();
+            const end = Math.min(Number(p[1]), P.count(kind));
+            for (let k = Math.max(1, Number(p[0])); k <= end; k++) add(kind, k, 'set', at, i, text);
+            if (c.code === 121) break;
             if (p[3] === 1) add('var', p[4], 'check', at, i, t());
             if (p[3] === 4) scan(String(p[4] || ''), at, i, 'script');
             break;
-          case 103: case 104: case 285: add('var', p[0], 'set', at, i, t()); break;
+          }
+          case 103: case 104: add('var', p[0], 'set', at, i, t()); break;
+          case 285: add('var', p[0], 'set', at, i, t()); if (p[2] === 1) readVars(p[3], p[4]); break;
           case 117: add('ce', p[0], 'call', at, i, t()); break;
-          case 126: add('item', p[0], 'set', at, i, t()); if (p[2] === 1) add('var', p[3], 'check', at, i, t()); break;
+          case 125: if (p[1] === 1) readVars(p[2]); break;
+          case 126: case 127: case 128:
+            if (c.code === 126) add('item', p[0], 'set', at, i, t());
+            if (p[2] === 1) readVars(p[3]);
+            break;
           case 129: add('actor', p[0], 'set', at, i, t()); break;
-          case 201: if (p[0] === 0) add('map', p[1], 'go', at, i, t()); else { add('var', p[1], 'check', at, i, t()); add('var', p[2], 'check', at, i, t()); add('var', p[3], 'check', at, i, t()); } break;
-          case 231: add('picture', p[1], 'show', at, i, t()); break;
+          case 201: if (p[0] === 0) add('map', p[1], 'go', at, i, t()); else readVars(p[1], p[2], p[3]); break;
+          case 202: if (p[1] === 1) readVars(p[2], p[3], p[4]); break;
+          case 203: if (p[1] === 1) readVars(p[2], p[3]); break;
+          case 205: moveRoute(p[1], i); break;
+          case 231: case 232:
+            if (c.code === 231) add('picture', p[1], 'show', at, i, t());
+            if (p[3] === 1) readVars(p[4], p[5]);
+            break;
+          case 301: if (p[0] === 1) readVars(p[1]); break;
           case 355: case 655: scan(String(p[0] || ''), at, i, 'script'); break;
           case 322:
             if (p[1]) add('sprite', p[1] + '#' + (p[2] || 0), 'set', at, i, '更改角色图像');
             if (p[3]) add('face', p[3] + '#' + (p[4] || 0), 'set', at, i, '更改角色图像');
             break;
           case 101: if (p[0]) add('face', p[0] + '#' + (p[1] || 0), 'say', at, i, t()); if (p[4]) for (const m of String(p[4]).matchAll(/\\N\[(\d+)\]/gi)) add('actor', m[1], 'say', at, i, t()); break;
+          case 102:
+            for (const label of p[0] || []) {
+              const { text, disable, hide } = choicecond.split(label);
+              for (const [type, src] of [['choiceLock', disable], ['choiceHide', hide]]) {
+                if (src) addRule(type, i, '选项「' + P.expandN(text.trim()) + '」 · ' + choicecond.describe(src, (kind, id) => P.name(kind, id)), impact.choiceTest(src));
+              }
+            }
+            break;
+          case 401: case 405:
+            for (const m of String(p[0] || '').matchAll(/\\V\[(\d+)\]/gi)) add('var', m[1], 'say', at, i, t());
+            break;
         }
       });
     });

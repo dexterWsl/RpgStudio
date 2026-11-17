@@ -126,12 +126,12 @@ function chooseDialog(title, names) {
 // 选变量 / 开关：列表里没有合适的就当场新建一个（和「出现条件」里的新建走同一个接口）
 async function pickNameOrCreate(title, kind) {
   const label = kind === 'var' ? '变量' : '开关';
-  let names;
-  try { names = (await lookup(kind)).filter(r => r.name).map(r => r.name); } catch (e) { toast(e.message, true); return null; }
+  let rows;
+  try { rows = (await lookup(kind)).filter(r => r.name); } catch (e) { toast(e.message, true); return null; }
   return openDialog(`<header><h3>${esc(title)}</h3><button class="quiet small" data-x>关闭</button></header>
     <div class="dbody">
-      <input id="pq" placeholder="筛选（共 ${names.length} 个）">
-      <div id="pl" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:46vh;overflow:auto"></div>
+      <input id="pq" placeholder="筛选（共 ${rows.length} 个）">
+      <div id="pl" class="impact-picker"></div>
       <div class="cnew"><button type="button" class="small quiet" id="pcNew">＋ 新建${label}</button></div>
       <div id="pcForm" hidden>
         <div class="fgrid"><label for="pcName">名字</label><input id="pcName" maxlength="40" placeholder="比如：${kind === 'var' ? '好感度' : '见过长老'}"><button type="button" class="small primary" id="pcOk">新建</button></div>
@@ -143,8 +143,12 @@ async function pickNameOrCreate(title, kind) {
     (d, done) => {
       const input = $('#pq', d), list = $('#pl', d);
       const draw = q => {
-        const hit = names.filter(n => !q || n.toLowerCase().includes(q)).slice(0, 240);
-        list.innerHTML = hit.map(n => `<button data-n="${esc(n)}" style="text-align:left;white-space:normal;overflow-wrap:anywhere">${esc(n)}</button>`).join('') || '<div class="dim">没有符合的，点下面「新建」</div>';
+        const hit = rows.filter(r => !q || (r.id + ' ' + r.name).toLowerCase().includes(q)).slice(0, 240);
+        list.innerHTML = hit.map(r => {
+          const name = r.name.trim(), duplicate = rows.find(row => row.name.trim().toLowerCase() === name.toLowerCase())?.id !== r.id;
+          const ref = duplicate || /^\d+$/.test(name) ? r.id : name;
+          return `<div><button type="button" data-n="${esc(ref)}">${esc(r.name)} <small class="dim">#${r.id}</small></button>${impactButton(kind, r.id)}</div>`;
+        }).join('') || '<div class="dim">没有符合的，点下面「新建」</div>';
         $$('[data-n]', list).forEach(b => b.onclick = () => done(b.dataset.n));
       };
       const submit = async () => {

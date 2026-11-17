@@ -17,7 +17,7 @@ const BLK_DIR = { 2: '下', 4: '左', 6: '右', 8: '上' };
 // #后面的词 → 按钮颜色
 const BLK_CAT = {
   传送: 'tp', 扮演: 'tp', 场景: 'scene',
-  变量: 'state', 开关: 'state', 物品: 'state', 独立开关: 'state',
+  变量: 'state', 开关: 'state', 物品: 'state', 独立开关: 'state', 结算: 'state',
   图: 'stage', CG: 'stage', cg: 'stage', 显示图片: 'stage', 清图: 'stage', 清除图片: 'stage', 关闭图片: 'stage', 关图: 'stage', 不要图: 'stage', 立绘: 'stage', 退场: 'stage', 字幕: 'stage',
   飘字: 'move', 动作: 'move', 行走图: 'move', 透明: 'move', 气泡: 'move', 消失: 'move',
   音乐: 'sound', 停音乐: 'sound', 环境音: 'sound', 停环境音: 'sound', 音效: 'sound',
@@ -414,10 +414,24 @@ function mountBlocks(host, ed) {
     if (c.verb === '场景') items.push(['换一个场景…', async () => { const n = await scenePicker(); if (n) replace('#场景 ' + n); }], ['打开这个场景看看', async () => {
       try { const p = await api('line/parse?text=' + enc(r.inner)); const it = p.items && p.items[0]; if (it && it.id) location.hash = '#/ce/' + it.id; else toast(p.error || '找不到这个场景', true); } catch (e) { toast(e.message, true); }
     }]);
+    if (c.verb === '结算') items.push(['换一个结算组…', async () => { const n = await settlementPicker(); if (n) replace('#结算 ' + n); }], ['查看结算组', async () => {
+      try {
+        const r0 = await api('line/parse?text=' + enc(r.inner)), it = r0.items?.[0];
+        if (it?.id) location.hash = '#/settlements/' + it.id;
+        else toast(r0.error || '找不到结算组', true);
+      } catch (error) { toast(error.message, true); }
+    }]);
     if (c.verb === '扮演') items.push(['换一个人…', async () => { const l = await asDialog(); if (l) replace(l); }]);
     if (c.verb === '变量') items.push(['换一个变量…', async () => { const n = await pickDialog('换一个变量', 'lookup?kind=var'); if (!n) return; const op = /([=+\-*/%]\s*-?\d+)\s*$/.exec(c.rest); replace('#变量 ' + n + ' ' + (op ? op[1] : '= 0')); }]);
     if (c.verb === '开关') items.push(['换一个开关…', async () => { const n = await pickDialog('换一个开关', 'lookup?kind=switch'); if (n) replace('#开关 ' + n + (/关\s*$/.test(c.rest) ? ' 关' : ' 开')); }], [/关\s*$/.test(c.rest) ? '改成「开」' : '改成「关」', () => replace('#开关 ' + c.rest.replace(/\s*(开|关)\s*$/, '') + (/关\s*$/.test(c.rest) ? ' 开' : ' 关'))]);
     if (c.verb === '物品') items.push(['换一个物品…', async () => { const n = await pickDialog('换一个物品', 'lookup?kind=item'); if (!n) return; const k = /([+\-]\s*\d+)\s*$/.exec(c.rest); replace('#物品 ' + n + ' ' + (k ? k[1].replace(/\s+/g, '') : '+1')); }]);
+    if (c.verb === '变量' || c.verb === '开关') items.push(['影响范围', async () => {
+      try {
+        const parsed = await api('line/parse?text=' + enc(r.inner)), action = parsed.items?.[0];
+        if (action?.id && !parsed.error) showActionImpact(c.verb === '变量' ? 'var' : 'switch', action.id, action);
+        else toast(parsed.error || '找不到这个开关或变量', true);
+      } catch (error) { toast(error.message, true); }
+    }]);
     if (['图', 'CG', 'cg', '显示图片'].includes(c.verb)) items.push(['换一张图…', async () => { const n = await pickDialog('换一张图', 'images?sub=pictures', true); if (n) replace('#图 ' + n); }]);
     items.push(['改成文字（直接改这一行）', () => rawEdit(i)], ['删掉这一行', () => del(i)]);
     menu(el, items);

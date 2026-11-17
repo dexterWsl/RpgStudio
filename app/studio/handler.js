@@ -28,7 +28,7 @@ const { json, readBody, saveUpload, createHostGuard, createStatic } = require('.
 const { UserError } = require('./lib/util.js');
 
 const WEB = path.join(__dirname, 'web');
-const MODULES = ['core', 'events', 'maps', 'placing', 'tilesets', 'system', 'names', 'people', 'images', 'gallery', 'projects', 'assets', 'progress', 'scenes'].map(n => require('./routes/' + n + '.js'));
+const MODULES = ['core', 'events', 'maps', 'placing', 'tilesets', 'system', 'names', 'people', 'images', 'gallery', 'projects', 'assets', 'progress', 'scenes', 'settlements'].map(n => require('./routes/' + n + '.js'));
 const DEFAULT_MAX_UPLOAD = 4 * 1024 ** 3;   // 上传游戏 / 素材包的上限（opts.projects.maxUpload 可以改）
 const val = v => (typeof v === 'function' ? v() : v);
 

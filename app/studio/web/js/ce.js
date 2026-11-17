@@ -5,6 +5,7 @@ async function viewCe(main, id) {
   if (S.tab !== 'ces') { S.tab = 'ces'; remember(); drawNav(); }
   main.innerHTML = '<div class="loading">正在读取公共事件…</div>';
   const c = await api('ce?id=' + id);
+  if (c.isSettlement) { location.replace('#/settlements/' + id); return; }
   const callers = capped(c.calledFrom.map(x => `<a class="rowlink" href="${hrefOf(x.at)}"><span>${esc(x.where)}</span><span class="r">第 ${x.line + 1} 条</span></a>`), 6);
   main.innerHTML = `<div class="page">
     <div class="crumbs"><span>公共事件</span></div>

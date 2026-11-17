@@ -16,7 +16,7 @@ async function viewNames(main, kind, focus) {
       ${people.length ? `<label class="nwho"><span class="dim">人物</span><select id="nwho"><option value="">全部人物</option>${people.map(p => `<option value="${esc(p.key)}" ${who === p.key ? 'selected' : ''}>${esc(p.name)}${p.speakerOnly ? '（只说话）' : ''}</option>`).join('')}</select></label>` : ''}
     </div>
     <div id="nwhoBar"></div>
-    <div class="card" style="overflow:auto"><table class="ntable"><thead><tr><th style="width:56px">#</th><th>名字</th><th class="c">判断</th><th class="c">设置</th><th class="c hide-narrow">脚本</th><th class="hide-narrow" id="npcol">人物</th><th class="hide-narrow">提示</th></tr></thead><tbody id="ntb"></tbody></table></div>
+    <div class="card" style="overflow:auto"><table class="ntable"><thead><tr><th style="width:56px">#</th><th>名字</th><th class="c">判断</th><th class="c">设置</th><th class="c hide-narrow">脚本</th><th class="hide-narrow" id="npcol">人物</th><th class="hide-narrow">提示</th><th scope="col">操作</th></tr></thead><tbody id="ntb"></tbody></table></div>
     <p class="dim" style="margin-top:8px;font-size:12.5px">名字直接改，回车或点别处就保存。点一行看它在哪里被用到。「人物」一列是按台词和出场自动算的：用到这个${label}的地方主要是谁在说话 / 出场；在人物页里可以手动关联。</p>
   </div>`;
   const tb = $('#ntb');
@@ -34,10 +34,11 @@ async function viewNames(main, kind, focus) {
       <td><input value="${esc(x.name)}" data-orig="${esc(x.name)}" aria-label="${label} ${x.id} 的名字" maxlength="40"></td>
       <td class="c">${x.check || ''}</td><td class="c">${x.set || ''}</td><td class="c hide-narrow">${x.script || ''}</td>
       <td class="hide-narrow npeople">${whoCell(x)}</td>
-      <td class="hide-narrow">${x.hint ? `<span class="hint">${esc(x.hint)}</span> ` : ''}${x.flags.map(f => `<span class="flag ${f}">${FLAG[f]}</span>`).join(' ')}</td></tr>`).join('')
-      || `<tr><td colspan="7" class="dim" style="padding:20px;text-align:center">${rel ? '这个人的戏里没有用到' + label + '，可以点上面的「新建」给他加一个' : '没有符合的' + label}</td></tr>`;
+      <td class="hide-narrow">${x.hint ? `<span class="hint">${esc(x.hint)}</span> ` : ''}${x.flags.map(f => `<span class="flag ${f}">${FLAG[f]}</span>`).join(' ')}</td>
+      <td>${impactButton(kind, x.id)}</td></tr>`).join('')
+      || `<tr><td colspan="8" class="dim" style="padding:20px;text-align:center">${rel ? '这个人的戏里没有用到' + label + '，可以点上面的「新建」给他加一个' : '没有符合的' + label}</td></tr>`;
     $$('tr[data-id]', tb).forEach(tr => {
-      tr.onclick = e => { if (e.target.tagName === 'INPUT' || e.target.closest('a')) return; $$('tr.on', tb).forEach(t => t.classList.remove('on')); tr.classList.add('on'); showRefs(kind, tr.dataset.id); };
+      tr.onclick = e => { if (e.target.closest('input, a, button')) return; $$('tr.on', tb).forEach(t => t.classList.remove('on')); tr.classList.add('on'); showRefs(kind, tr.dataset.id); };
       const inp = $('input', tr);
       const commit = async () => {
         if (inp.value === inp.dataset.orig) return;

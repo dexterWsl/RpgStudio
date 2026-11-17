@@ -34,6 +34,7 @@ const CONT_OF = { 401: 101, 405: 105, 408: 108, 655: 355, 657: 357, 505: 205, 60
 const { createTextCodes } = require('./textcodes.js');
 const choicecond = require('./choicecond.js');
 const stage = require('./stage.js');
+const { isSettlement } = require('./settlements.js');
 
 function createDescriber(project, opts = {}) {
   const codes = createTextCodes(project);
@@ -108,8 +109,8 @@ function createDescriber(project, opts = {}) {
       }
       m = /^!\s*\$gameSwitches\.value\((\d+)\)$/.exec(x);
       if (m) return { kind: 'switch', id: Number(m[1]), on: false };
-      m = /^\$gameSwitches\.value\((\d+)\)\s*(?:===?|!==?)\s*(true|false)$/.exec(x);
-      if (m) return { kind: 'switch', id: Number(m[1]), on: m[2] !== 'false' };
+      m = /^\$gameSwitches\.value\((\d+)\)\s*(===?|!==?)\s*(true|false)$/.exec(x);
+      if (m) return { kind: 'switch', id: Number(m[1]), on: (m[3] === 'true') === (m[2][0] === '=') };
       m = /^\$gameSwitches\.value\((\d+)\)$/.exec(x);
       if (m) return { kind: 'switch', id: Number(m[1]), on: true };
       return null;
@@ -159,7 +160,7 @@ function createDescriber(project, opts = {}) {
       case 413: return '循环结束（回到开头）';
       case 113: return '跳出循环';
       case 115: return '中止事件';
-      case 117: return '调用 ' + L('ce', p[0]);
+      case 117: return (isSettlement((P.read('CommonEvents.json') || [])[p[0]]) ? '结算 ' : '调用 ') + L('ce', p[0]);
       case 118: return `标签「${p[0]}」`;
       case 119: return `跳到标签「${p[0]}」`;
       case 121: return `${range('switch', p[0], p[1])} → ${p[2] === 0 ? '开' : '关'}`;
@@ -378,7 +379,7 @@ function createDescriber(project, opts = {}) {
     return rows.filter(r => !(r.code === 0 && !r.text));
   }
 
-  return { describe, condText, condSrc, operand, pageConditions, outline, category, refsOf, codes };
+  return { describe, condText, condSrc, parseCondScript, operand, pageConditions, outline, category, refsOf, codes };
 }
 
 module.exports = { createDescriber, category, TRIGGERS, PRIORITIES, CE_TRIGGERS, VAR_OPS, CMP };

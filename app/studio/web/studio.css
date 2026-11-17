@@ -601,6 +601,35 @@ dialog footer{display:flex;align-items:center;gap:8px;padding:12px 18px;border-t
 .frow .ins select,.frow .ins input{min-width:0;flex:1}
 .frow .ins input.n{flex:0 0 90px}
 .fgrid{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px 12px;align-items:center}
+.settlement-list{display:grid;gap:12px;margin-top:14px}
+.settlement-card{padding:14px 16px;display:grid;gap:8px}
+.settlement-card.settlement-selected{border-color:var(--acc)}
+.settlement-heading{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.settlement-heading h2{font-size:16px}
+.settlement-script{margin:0;padding:10px 12px;background:var(--field);border-radius:8px;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+dialog.dlg-settlement{width:min(760px,calc(100vw - 24px))}
+.settlement-source{width:100%;min-height:260px;resize:vertical;padding:12px;line-height:1.65;tab-size:2}
+.settlement-pick{display:flex;gap:8px;align-items:center}
+.settlement-pick select{flex:1;min-width:0}
+.group-impact-actions li{display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap}
+.impact-button{white-space:nowrap}
+.impact-picker{display:grid;gap:5px;max-height:46vh;overflow:auto}
+.impact-picker>div{display:flex;align-items:center;gap:6px}
+.impact-picker [data-n]{flex:1;min-width:0;text-align:left;white-space:normal;overflow-wrap:anywhere}
+dialog.dlg-impact{width:min(720px,calc(100vw - 24px))}
+.impact-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px}
+.impact-controls>div{display:flex;gap:6px;align-items:center}
+.impact-controls input{width:7.5rem}
+.impact-group{border-top:1px solid var(--line2)}
+.impact-group summary{padding:10px 3px;cursor:pointer;font-weight:600}
+.impact-group summary span{margin-left:6px;font-weight:400}
+.impact-group ul{margin:0 0 10px;padding:0;display:grid;gap:6px;list-style:none}
+.impact-entry{background:var(--bg);border-radius:6px;padding:8px 10px;overflow-wrap:anywhere}
+.impact-entry>div:first-child{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 9px}
+.impact-entry a{color:var(--acc);text-decoration:underline;text-underline-offset:3px}
+.impact-entry p{margin:4px 0}
+.impact-effect{font-weight:600}
+.side-in>.impact-button{margin-top:7px}
 .fnote{font-size:12px;color:var(--ink2)}
 #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
 #toast div{background:#1d2633;border:1px solid #34445a;color:var(--ink);padding:8px 14px;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.45);font-size:13px}

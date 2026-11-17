@@ -270,7 +270,7 @@ async function scenePicker() {
     api('ces').catch(() => ({ ces: [] })),
   ]);
   const scenes = (sc.scenes || []).map(s => s.name).filter(Boolean);
-  const all = (ce.ces || []).filter(c => String(c.name || '').trim()).map(c => c.name);
+  const all = (ce.ces || []).filter(c => !c.isSettlement && String(c.name || '').trim()).map(c => c.name);
   const names = [...scenes, ...all.filter(n => !scenes.includes(n))];
   if (!names.length) { toast('还没有能调用的公共事件', true); return null; }
   return (await chooseDialog('插入场景：播哪个公共事件（场景库里的排前面）', names)) || null;

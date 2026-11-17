@@ -11,6 +11,7 @@
 //   POST play { text, at? }                还没保存的台词（新建场景时边写边看；at = 正在改的那一页）
 const { need, int, clone, END, UserError } = require('../lib/util.js');
 const { MARK_CMD, isMarked } = require('../core/scenes.js');
+const { isSettlement } = require('../core/settlements.js');
 
 module.exports = function (ctx) {
   const { project, tools } = ctx;
@@ -164,6 +165,7 @@ module.exports = function (ctx) {
         T.store.edit(['CommonEvents.json'], docs => {
           const c = docs['CommonEvents.json'][id];
           need(c, '公共事件 ' + id + ' 不存在');
+          need(!isSettlement(c), '请用结算组管理这个公共事件');
           const list = c.list || [END()];
           if (b.on === false) c.list = list.filter((x, i) => !(i < 3 && x && x.code === 108 && isMarked([x])));
           else {

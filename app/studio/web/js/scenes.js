@@ -39,6 +39,7 @@ async function sceneDialog(opts = {}, st = null) {
             <button type="button" class="small" id="scVarBtn" data-ins="var" aria-expanded="false">插入变量…</button>
             <button type="button" class="small" data-ins2="sw">插入开关…</button>
             <button type="button" class="small" data-ins2="sc">插入场景…</button>
+            <button type="button" class="small" data-ins="settlement" aria-expanded="false">插入结算…</button>
             <button type="button" class="small" data-ins2="tp">插入传送…</button>
             <button type="button" class="small" data-ins2="as" title="场景里主角的小人换成别人，场景播完自动换回">插扮演…</button>
             <button type="button" class="small" data-ins2="float">插飘字…</button>
@@ -149,9 +150,9 @@ async function sceneDialog(opts = {}, st = null) {
               mountPicturePicker(pickBox, names, name => { insert('#图 ' + name + '\n'); closePick(); });
               return;
             }
-            const rows = await lookup(kind);
+            const rows = kind === 'settlement' ? (await api('settlements')).groups.filter(g => g.editable) : await lookup(kind);
             if (pickKind !== kind) return;
-            const label = kind === 'item' ? '物品' : '变量';
+            const label = kind === 'settlement' ? '结算组' : kind === 'item' ? '物品' : '变量';
             const list = rows.filter(r => r.name);
             if (!list.length) { pickBox.innerHTML = '<div class="dim">这个工程里还没有' + label + '</div>'; return; }
             pickBox.innerHTML = '<div class="picture-filters"><input type="search" placeholder="搜索' + label + '（共 ' + list.length + ' 个）"></div><div class="insgrid"></div>'
@@ -179,7 +180,7 @@ async function sceneDialog(opts = {}, st = null) {
               $$('[data-ins-row]', grid).forEach(b => b.onclick = () => {
                 const row = list.find(x => String(x.id) === b.dataset.insRow);
                 if (!row) return;
-                insert(kind === 'item' ? '#物品 ' + row.name + ' +1\n' : '#变量 ' + row.name + ' + 1\n');
+                insert(kind === 'settlement' ? '#结算 ' + row.ref + '\n' : kind === 'item' ? '#物品 ' + row.name + ' +1\n' : '#变量 ' + row.name + ' + 1\n');
                 closePick();
               });
             };

@@ -205,7 +205,7 @@ function createMerger(ctx) {
   const OTHER_KIND = { 231: 'pic', 235: 'clear', 355: 'clear', 230: 'wait', 121: 'switch', 122: 'var', 126: 'item', 201: 'transfer',
     221: 'fade', 222: 'fade', 223: 'tint', 225: 'shake', 241: 'bgm', 242: 'bgm', 245: 'bgs', 246: 'bgs', 250: 'se', 213: 'balloon', 117: 'call', 211: 'transparent', 322: 'look', 214: 'erase', 123: 'selfsw', 354: 'title',
     204: 'camera', 224: 'flash', 236: 'weather' };
-  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'act', 'plugin']);
+  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'settlement', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'act', 'plugin']);
 
   // 一条非台词指令在编辑框里的那一行；确认「这一行再解析回去」能得到同样的核心内容，否则写成 #原样
   function otherLine(c) {
@@ -321,7 +321,7 @@ function createMerger(ctx) {
       }
       let text = null, kind = OTHER_KIND[c.code];
       const sl = ctx.stagingLine ? ctx.stagingLine(c, st) : '';
-      if (sl && checkLine(sl, c, st)) { text = sl; if (c.code === 231) kind = 'bust'; if (c.code === 235) kind = 'unbust'; }
+      if (sl && checkLine(sl, c, st)) { text = sl; if (c.code === 231) kind = 'bust'; if (c.code === 235) kind = 'unbust'; if (c.code === 117 && sl.startsWith('#结算 ')) kind = 'settlement'; }
       if (text == null) text = (c.code === 235 || c.code === 355) ? clearLine(c, st) : otherLine(c);
       picApply(st, c);
       segs.push({ kind, raw: [c], text });
@@ -461,7 +461,7 @@ function createMerger(ctx) {
       // # 标记
       if (seg.text.startsWith(KEEP.trim())) throw new Error('「#原样」行只能删除或挪位置，不能改内容：' + seg.text);
       const it = seg.item || (ctx.parseScript(seg.text) || [])[0];
-      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景，#如果 条件 / #否则 / #结束，#插件 插件名 指令名（参数…））');
+      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景 #结算，#如果 条件 / #否则 / #结束，#插件 插件名 指令名（参数…））');
       if (it.type === 'bust' || it.type === 'unbust') {
         if (it.type === 'bust' && !ctx.picExists(it.who ? '立绘/' + it.who + '_' + it.face : '')) throw new Error('立绘不存在：img/pictures/立绘/' + it.who + '_' + it.face + '（先把图放进去，或者用「导入素材」）');
         emit((it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st)).map(at));

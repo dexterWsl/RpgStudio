@@ -44,6 +44,7 @@ async function render(o = {}) {
     else if (r.name === 'gallery') await viewGallery(main);
     else if (r.name === 'progress') await viewProgress(main, r.a);
     else if (r.name === 'scenes') await viewScenes(main);
+    else if (r.name === 'settlements') await viewSettlements(main, r.a);
     else if (r.name === 'projects') await viewProjects(main, r.a);
     else if (r.name === 'assets') await viewAssets(main);
     else if (r.name === 'tilesets') await viewTilesets(main, r.a);
@@ -154,9 +155,10 @@ async function showRefs(kind, id) {
   const side = $('#side');
   $('#shell').classList.remove('noside');
   side.innerHTML = '<div class="side-in loading">正在查找…</div>';
-  S.side = { kind, id };
+  const selection = S.side = { kind, id };
   try {
     const r = await api('refs?kind=' + enc(kind) + '&id=' + enc(id));
+    if (S.side !== selection) return;
     const groups = { set: [], check: [], script: [], other: [] };
     for (const x of r.refs) (groups[x.use] || groups.other).push(x);
     const USE = { set: '改它的地方', check: '判断它的地方', script: '脚本里用到', other: '其它' };
@@ -166,12 +168,13 @@ async function showRefs(kind, id) {
       <h2>${esc(r.label)}</h2>
       ${r.hint ? `<div style="margin:6px 0"><span class="hint">${esc(r.hint)}</span></div>` : ''}
       <div class="dim">${r.refs.length ? `用到 ${r.refs.length} 处` : '没有任何地方用到它'}</div>
+      ${kind === 'var' || kind === 'switch' ? impactButton(kind, r.id) : ''}
       ${kind === 'picture' ? `<img class="sidepic" src="${img('pictures', id)}" alt="${esc(id)}">` : ''}
       ${Object.entries(groups).filter(([, v]) => v.length).map(([k, v]) => `<div class="refgroup"><h3>${USE[k]}（${v.length}）</h3>
         ${v.map(x => `<a class="refitem" href="${hrefOf(x.at)}"><div class="w">${esc(x.where)}</div><div class="t"><span class="usetag ${x.use}">${TAG[x.use] || x.use}</span>${esc(x.text)}</div></a>`).join('')}</div>`).join('')}
     </div>`;
     $('#sideX').onclick = closeSide;
-  } catch (e) { side.innerHTML = `<div class="side-in"><div class="err">${esc(e.message)}</div></div>`; }
+  } catch (e) { if (S.side === selection) side.innerHTML = `<div class="side-in"><div class="err">${esc(e.message)}</div></div>`; }
 }
 const hrefOf = at => !at ? '#/' : at.type === 'map' ? (at.ev != null ? `#/event/${at.map}/${at.ev}/${at.page || 0}` : `#/map/${at.map}`) : at.type === 'ce' ? `#/ce/${at.ce}` : at.type === 'actor' ? `#/people/a${at.actor}` : '#/';
 
@@ -182,6 +185,6 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   const r = e.target.closest && e.target.closest('.ref');
   if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showRefs(r.dataset.kind, r.dataset.id); }
-  if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#q').focus(); }
-  if (e.key === 'Escape' && S.side && !$('#dlg').open) closeSide();
+  if (e.key === '/' && !$('dialog[open]') && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#q').focus(); }
+  if (e.key === 'Escape' && S.side && !$('dialog[open]')) closeSide();
 });

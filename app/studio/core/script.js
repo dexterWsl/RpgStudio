@@ -26,6 +26,7 @@
 //   #立绘 人物 表情 [左|中|右]  显示立绘 img/pictures/立绘/人物_表情（底边贴着画面下沿）；同一个人再写一次 = 换表情 / 换位置
 //   #退场 人物 / #退场       收起这个人的立绘 / 收起所有立绘
 //   #场景 名字               在这里播另一个场景（调用公共事件），播完接着往下
+//   #结算 组名               按顺序执行结算组里的开关与变量操作
 //   #行走图 角色 图名 编号   换角色的行走图（现实 / 游戏里两套样子）
 //   #透明 开 / #透明 关      主角隐身 / 现身（黑场、过场时用）
 //   #消失                    这个事件先不见（离开地图再回来又在：打倒的怪、拿走的东西）
@@ -43,6 +44,7 @@
 //                           例：#插件 VisuMZ_2_VNPictureBusts Basic_ExitBusts（["50"]，-200）
 const { newPicState } = require('./merge.js');
 const stage = require('./stage.js');
+const { isSettlement, settlementBody, settlementId, settlementRef } = require('./settlements.js');
 
 // 色调预设：[红, 绿, 蓝, 灰]
 const TINTS = { 正常: [0, 0, 0, 0], 夜晚: [-68, -68, 0, 68], 深夜: [-110, -110, -34, 102], 黄昏: [68, -34, -34, 0], 回忆: [34, -34, -68, 170], 灰暗: [-34, -34, -34, 170], 红: [68, -68, -68, 0] };
@@ -105,7 +107,8 @@ function createScript(project, opts = {}) {
     const q = String(raw || '').trim();
     if (!q) return 0;
     if (/^\d+$/.test(q)) return Number(q);
-    const rows = P.rows(kind).filter(x => x.name);
+    const groups = kind === 'ce' ? P.read('CommonEvents.json') || [] : [];
+    const rows = P.rows(kind).filter(x => x.name && !isSettlement(groups[x.id]));
     const want = q.toLowerCase();
     const hit = rows.find(x => x.name.trim().toLowerCase() === want);
     if (hit) return hit.id;
@@ -162,7 +165,7 @@ function createScript(project, opts = {}) {
     return hit ? hit.name : '';
   }
   // 一个条件 → 111 的参数（开关：[0,id,0|1]，变量：[1,id,0,值,比较]）
-  function condOne(t) {
+  function condOne(t, { strict, allowMissingTargets }) {
     for (const [word, sym] of COND_WORDS) {
       const at = t.lastIndexOf(word);
       if (at <= 0) continue;
@@ -170,16 +173,17 @@ function createScript(project, opts = {}) {
       const val = t.slice(at + word.length).trim();
       if (!name || !/^-?\d+$/.test(val)) continue;
       const id = resolveRef(name, 'var');
-      if (!id) {
+      if (!id || (strict && !allowMissingTargets && !exists('var', id))) {
         const near = nearName('var', name);
         throw new Error('找不到这个变量：' + name + (near ? '（是不是「' + near + '」？）' : '') + '　例：#如果 变量 ' + (near || 'DayCount') + ' >= 3');
       }
+      if (strict && !Number.isSafeInteger(Number(val))) throw new Error('比较值超出安全整数范围');
       return [1, id, 0, Number(val), COND_OP[sym]];
     }
     const sw = /^(?:开关\s*)?(.+?)\s*(开|关)$/.exec(t);
     if (sw) {
       const id = resolveRef(sw[1].trim(), 'switch');
-      if (!id) {
+      if (!id || (strict && !allowMissingTargets && !exists('switch', id))) {
         const near = nearName('switch', sw[1].trim());
         throw new Error('找不到这个开关：' + sw[1].trim() + (near ? '（是不是「' + near + '」？）' : '') + '　例：#如果 开关 自由时间 开');
       }
@@ -192,7 +196,8 @@ function createScript(project, opts = {}) {
     ? (p[2] ? `$gameSwitches.value(${p[1]}) === false` : `$gameSwitches.value(${p[1]})`)
     : `$gameVariables.value(${p[1]}) ${['==', '>=', '<=', '>', '<', '!='][p[4]] || '=='} ${p[3]}`;
   // #如果 / #条件 后面那段：先拆 并且 / 或者，再一个个认
-  function condParams(text) {
+  function condParams(text, options = {}) {
+    const { strict } = options;
     let t = String(text || '').trim();
     // 外面套了方括号 / 圆括号（[变量 X>=30]、【…】）先剥掉
     for (let k = 0; k < 3; k++) {
@@ -204,20 +209,21 @@ function createScript(project, opts = {}) {
     // 从阅读视图抄下来的样子也认：变量 38「名字」 ≥ 1、开关 26「名字」 为开
     t = t.replace(/「[^」]{0,40}」/g, '')
       .replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/≠/g, '!=')
-      .replace(/＝/g, '=').replace(/为s*(开|关)s*$/, '$1')
+      .replace(/＝/g, '=').replace(/为\s*(开|关)(?=\s|$)/g, '$1')
       .replace(/\s+/g, ' ').trim();
     if (!t) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
-    const ors = t.split(/\s*(?:或者|或是|或|\|\||\|)\s*/).map(s => s.trim()).filter(Boolean);
+    const ors = t.split(/\s*(?:或者|或是|或|\|\||\|)\s*/).map(s => s.trim());
     if (!ors.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
-    const groups = ors.map(g => g.split(/\s*(?:并且|而且|同时|且|&&|&)\s*/).map(s => s.trim()).filter(Boolean));
+    const groups = ors.filter(g => strict || g).map(g => g.split(/\s*(?:并且|而且|同时|且|&&|&)\s*/).map(s => s.trim()).filter(s => strict || s));
+    if (strict && groups.some(g => g.some(s => !s))) throw new Error('请补全条件');
     const flat = groups.flat();
     if (!flat.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
-    if (flat.length === 1) return condOne(flat[0]);
-    const parts = groups.map(g => g.map(one => condJS(condOne(one))).join(' && '));
+    if (flat.length === 1) return condOne(flat[0], options);
+    const parts = groups.map(g => g.map(one => condJS(condOne(one, options))).join(' && '));
     return [12, parts.length === 1 ? parts[0] : parts.map(p => '(' + p + ')').join(' || ')];
   }
 
-  function parseScript(text) {
+  function parseScript(text, { settlement = false, allowMissingTargets = false } = {}) {
     const items = [];
     const addMore = (list, line) => {
       const m = /^[＋+](.*)$/.exec(line), last = list[list.length - 1];
@@ -270,6 +276,11 @@ function createScript(project, opts = {}) {
       if (bu) return { type: 'bust', who: bu[1], face: bu[2], pos: bu[3] || '' };
       const ub = /^[#＃]\s*退场(?:[\s:：]+(\S+))?$/.exec(line);
       if (ub) return { type: 'unbust', who: ub[1] || '' };
+      const settle = /^[#＃]\s*结算(?:(?:[ \t]+|[:：][ \t]*)(.*))?$/.exec(line);
+      if (settle) {
+        const ref = (settle[1] || '').trim();
+        return { type: 'settlement', id: settlementId(P.read('CommonEvents.json') || [], ref), ref };
+      }
       const call = /^[#＃]\s*场景[\s:：]+(.+)$/.exec(line);
       if (call) return { type: 'call', id: resolveRef(call[1], 'ce'), ref: call[1].trim() };
       // #插件 插件名 指令名（值1，值2…）：参数表从插件文件读，生成 357 + 657 续行
@@ -310,29 +321,43 @@ function createScript(project, opts = {}) {
       if (nameBox && m && m[2]) return { type: 'say', speaker: m[1].trim(), text: m[2].trim() };
       return { type: 'say', speaker: '', text: line };
     };
-    for (const raw of String(text || '').split(/\r?\n/)) {
+    for (const [i, raw] of String(text || '').split(/\r?\n/).entries()) {
       const line = raw.trim();
       if (!line) continue;
+      const lineError = message => new Error((settlement ? '第 ' + (i + 1) + ' 行 · ' : '') + message);
       // #如果 条件 … #否则 … #结束
       const iff = /^[#＃]\s*(?:如果|条件)[\s:：]*(.+)$/.exec(line);
       if (iff && !/^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i.test(line)) {
         const node = { type: 'if', cond: iff[1].trim(), then: [], else: null, branch: null };
+        if (settlement) {
+          try { node.params = condParams(node.cond, { strict: true, allowMissingTargets }); } catch (error) { throw lineError(error.message); }
+        }
         node.branch = node.then;
         stack.push(node);
         continue;
       }
       if (/^[#＃]\s*(?:否则|不然)\s*$/.test(line)) {
         const node = stack[stack.length - 1];
-        if (!node) throw new Error('「#否则」前面没有 #如果');
-        if (node.else) throw new Error('一个 #如果 只能写一个 #否则');
+        if (!node) throw lineError('「#否则」前面没有 #如果');
+        if (node.else) throw lineError('一个 #如果 只能写一个 #否则');
         node.else = [];
         node.branch = node.else;
         continue;
       }
       if (/^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i.test(line)) {
         const node = stack.pop();
-        if (!node) throw new Error('「#结束」前面没有 #如果');
+        if (!node) throw lineError('「' + (settlement ? '#条件结束' : '#结束') + '」前面没有 #如果');
         target().push(node);
+        continue;
+      }
+      if (settlement) {
+        if (!/^[#＃]\s*(?:物品|变量|开关)/.test(line)) throw lineError('结算组可以写 #物品、#变量、#开关、#如果、#否则 和 #条件结束');
+        const action = parseOne(line);
+        if (action.type === 'say') throw lineError('指令写法有误，请写目标名称或编号及操作');
+        if (!action.id || (!allowMissingTargets && !exists(action.type, action.id))) throw lineError('找不到该物品、变量或开关');
+        if (action.type === 'item' && (!Number.isSafeInteger(action.count) || action.count < 1)) throw lineError('物品数量要是正整数');
+        if (action.type === 'var' && !Number.isSafeInteger(action.value)) throw lineError('变量值要在安全整数范围内');
+        target().push({ ...action, line: i + 1 });
         continue;
       }
       const ch = /^[#＃]\s*选项[\s:：]+(.+)$/.exec(line);
@@ -351,7 +376,7 @@ function createScript(project, opts = {}) {
       if (addMore(target(), line)) continue;
       target().push(parseOne(line));
     }
-    if (stack.length) throw new Error('「#如果」还差 ' + stack.length + ' 个「#结束」');
+    if (stack.length) throw new Error('「#如果」还差 ' + stack.length + ' 个「' + (settlement ? '#条件结束' : '#结束') + '」');
     return items;
   }
 
@@ -369,7 +394,7 @@ function createScript(project, opts = {}) {
         throw new Error('找不到这个名字：' + JSON.stringify(it));
       }
       if (it.type === 'if') {
-        out.push({ code: 111, indent: 0, parameters: condParams(it.cond) });
+        out.push({ code: 111, indent: 0, parameters: it.params || condParams(it.cond) });
         for (const sub of scriptCommands(it.then, o)) out.push({ ...sub, indent: (sub.indent || 0) + 1 });
         out.push({ code: 0, indent: 1, parameters: [] });
         if (it.else) {
@@ -450,7 +475,18 @@ function createScript(project, opts = {}) {
       case 'tint': return [{ code: 223, indent: 0, parameters: [TINTS[it.tone].slice(), Math.max(1, Math.round(it.sec * 60)), true] }];
       case 'shake': return [{ code: 225, indent: 0, parameters: [it.power, 5, 30, true] }];
       case 'balloon': return [{ code: 213, indent: 0, parameters: [it.target, it.balloon, true] }];
-      case 'call': if (!it.id || !P.has('ce', it.id)) throw new Error('找不到这个场景：' + (it.ref || it.id)); return [{ code: 117, indent: 0, parameters: [it.id] }];
+      case 'call': {
+        if (!it.id || !P.has('ce', it.id)) throw new Error('找不到这个场景：' + (it.ref || it.id));
+        if (isSettlement((P.read('CommonEvents.json') || [])[it.id])) throw new Error('请用「#结算 ' + (it.ref || it.id) + '」调用结算组');
+        return [{ code: 117, indent: 0, parameters: [it.id] }];
+      }
+      case 'settlement': {
+        if (!it.ref) throw new Error('「#结算」后面要写结算组名或编号');
+        const event = (P.read('CommonEvents.json') || [])[it.id];
+        if (!isSettlement(event)) throw new Error('找不到结算组「' + it.ref + '」');
+        if (!settlementBody(event)) throw new Error('结算组「' + it.ref + '」含有其它指令或开启了自动触发');
+        return [{ code: 117, indent: 0, parameters: [it.id] }];
+      }
       case 'look': {
         if (!it.actor || !P.has('actor', it.actor)) throw new Error('找不到这个角色：' + JSON.stringify(it));
         const a = (P.read('Actors.json') || [])[it.actor] || {};
@@ -552,7 +588,11 @@ function createScript(project, opts = {}) {
       case 223: { const t = tintName(p[0]); return t && p[2] ? '#色调 ' + t + (Number(p[1]) === 60 ? '' : ' ' + Math.round(Number(p[1]) / 60 * 100) / 100) : ''; }
       case 225: return Number(p[1]) === 5 && Number(p[2]) === 30 && p[3] ? '#震动' + (Number(p[0]) === 5 ? '' : ' ' + p[0]) : '';
       case 213: return (p[0] === -1 || p[0] === 0) && p[2] && BALLOON_TEXT[p[1]] ? '#气泡 ' + BALLOON_TEXT[p[1]] + (p[0] === 0 ? ' 本事件' : '') : '';
-      case 117: return P.has('ce', p[0]) ? '#场景 ' + refText('ce', p[0]) : '';
+      case 117: {
+        const events = P.read('CommonEvents.json') || [];
+        if (isSettlement(events[p[0]])) return '#结算 ' + settlementRef(events, p[0]);
+        return P.has('ce', p[0]) ? '#场景 ' + refText('ce', p[0]) : '';
+      }
       case 211: return '#透明 ' + (p[0] === 0 ? '开' : '关');
       case 214: return '#消失';
       case 354: return '#回到标题';

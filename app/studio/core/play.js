@@ -8,6 +8,7 @@
 const choicecond = require('./choicecond.js');
 const stage = require('./stage.js');
 const { isMarked } = require('./scenes.js');
+const { isSettlement } = require('./settlements.js');
 
 function createPlayer(project, describer) {
   const P = project;
@@ -108,6 +109,7 @@ function createPlayer(project, describer) {
         case 117: {
           const ce = ces()[p[0]];
           if (!ce) break;
+          if (isSettlement(ce)) { out.push({ t: 'note', text: '结算「' + (ce.name || ce.id) + '」' }); break; }
           if (ctx.depth >= 3 || ctx.seen.has(p[0])) { out.push({ t: 'note', text: `调用公共事件 ${p[0]}「${ce.name || ''}」` }); break; }
           ctx.depth++; ctx.seen.add(p[0]);
           const list2 = ce.list || [];

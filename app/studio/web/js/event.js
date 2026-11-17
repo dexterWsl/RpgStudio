@@ -324,6 +324,7 @@ function editBox(box, pg, at) {
           <button class="small" id="insIf" title="条件分支：如果 … 否则 …">如果</button>
           <button class="small" id="insTp" title="传送：在地图上点要去的格子">传送</button>
           <button class="small" id="insScene" title="在这里播另一个场景 / 公共事件">场景</button>
+          <button class="small" id="insSettlement" title="执行一组物品、变量和开关指令">结算</button>
           <button class="small" id="insVar">变量</button>
           <button class="small" id="insSwitch">开关</button>
           <button class="small" id="insItem">物品</button>
@@ -371,6 +372,7 @@ function editBox(box, pg, at) {
       <tr><td>#音乐 名字 80</td><td>放背景音乐（音量可以不写）；#停音乐 2 = 两秒内渐渐停掉；#环境音 / #停环境音 同理；#音效 名字</td></tr>
       <tr><td>#色调 夜晚 2</td><td>正常 / 夜晚 / 深夜 / 黄昏 / 回忆 / 灰暗 / 红，2 秒变过去（不写 = 1 秒）</td></tr>
       <tr><td>#场景 名字</td><td>在这里播另一个场景（公共事件），播完接着往下</td></tr>
+      <tr><td>#结算 交付任务奖励</td><td>执行同名结算组里的物品、变量、开关和条件分支</td></tr>
       <tr><td>#插件 插件名 指令名（参数…）</td><td>直接写插件指令（RPG Maker 的「插件指令」），参数按插件里的顺序用「，」隔开，没写的用插件里写的默认值。可以照着上面已经有的 #插件 行改。例：<span class="t-code">#插件 VisuMZ_2_VNPictureBusts Basic_ExitBusts（["50"]，-200）</span></td></tr>
       <tr><td>#行走图 角色 图名 编号</td><td>换角色的样子（比如现实里一套、游戏里一套）</td></tr>
       <tr><td>#透明 开 / 关</td><td>主角隐身 / 现身</td></tr>
@@ -520,6 +522,7 @@ function editBox(box, pg, at) {
   $('#insItem', box).onclick = async () => { const n = await pickDialog('插入物品', 'lookup?kind=item'); if (n) insert('#物品 ' + n + ' +1'); };
   $('#insVar', box).onclick = async () => { const n = await pickNameOrCreate('插入变量', 'var'); if (n) insert('#变量 ' + n + ' + 1'); };
   $('#insSwitch', box).onclick = async () => { const n = await pickNameOrCreate('插入开关', 'switch'); if (n) insert('#开关 ' + n + ' 开'); };
+  $('#insSettlement', box).onclick = async () => { const n = await settlementPicker(); if (n) insert('#结算 ' + n); };
   $('#insScene', box).onclick = async () => {
     const n = await scenePicker();
     if (n) insert('#场景 ' + n);
