@@ -183,6 +183,7 @@ async function actorDialog(p, presetName) {
 // 返回 { name, index, dir, pattern }；name 为空 = 不要图像
 async function spritePicker(cur, opt = {}) {
   const r0 = await api('sheets?sub=characters');
+  if (opt.parent && !opt.parent.open) return null;
   let sel = { name: cur.name || '', index: cur.index || 0, dir: cur.dir || 2, pattern: cur.pattern == null ? 1 : cur.pattern };
   return openDialog(`<header><h3>${esc(opt.title || '选小人')}</h3><button class="quiet small" data-x>取消</button></header>
     <div class="dbody" style="max-height:74vh">
@@ -198,7 +199,9 @@ async function spritePicker(cur, opt = {}) {
         const box = $('#spsel', d);
         info();
         if (!sel.name || opt.noDir) { box.innerHTML = ''; return; }
-        const im = await loadSheet(sel.name);
+        const name = sel.name;
+        const im = await loadSheet(name);
+        if (!d.open || sel.name !== name) return;
         if (!im) { box.innerHTML = ''; return; }
         box.innerHTML = '<span class="dim">朝向和姿势：</span>';
         for (const dir of [2, 4, 6, 8]) for (const pt of [0, 1, 2]) {

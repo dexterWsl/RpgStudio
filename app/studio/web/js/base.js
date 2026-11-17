@@ -77,18 +77,19 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') $$('.mmenu[o
 
 // ---------- 弹窗 ----------
 function openDialog(html, onReady) {
-  const d = $('#dlg');
-  // 一个接一个地开（先选地图、再填坐标）：上一个的 close 事件是异步来的，
-  // 开新的时它可能才刚到，所以按「第几次开」认领，别把新的那个当成关掉了
-  const gen = d._gen = (d._gen || 0) + 1;
+  const host = $('#dlg'), d = document.createElement('dialog');
+  // 每次使用自己的节点，迟到的 close 事件只会清理这个窗口。选择器可以叠在表单上方。
+  const nested = host.open;
+  if (nested) document.body.append(d);
+  else { d.id = 'dlg'; host.replaceWith(d); }
+  d._gen = (host._gen || 0) + 1;
   d.innerHTML = html;
-  d.onkeydown = null;
-  return new Promise(resolve => {
-    const done = v => { if (d._gen !== gen) return; if (d.open) d.close(); resolve(v); };
-    d.addEventListener('close', () => { if (d._gen === gen) resolve(undefined); }, { once: true });
+  return new Promise((resolve, reject) => {
+    const done = v => { if (!d.open) return; d.close(); resolve(v); };
+    d.addEventListener('close', () => { if (nested) d.remove(); resolve(undefined); }, { once: true });
     d.onclick = e => { if (e.target === d) done(undefined); };
-    d.showModal();
-    onReady(d, done);
+    try { d.showModal(); onReady(d, done); }
+    catch (error) { if (d.open) d.close(); else if (nested) d.remove(); reject(error); }
   });
 }
 function confirmDialog(title, text, okText) {

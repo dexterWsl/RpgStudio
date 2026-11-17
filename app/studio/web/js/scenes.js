@@ -16,7 +16,7 @@ function placeText(p) {
 //   opts.place = { map, x, y, seg, slot }  放在哪（从地图工作台点空格子来的）
 //   opts.link  = { at, line, label }        建好后关联到这个选项
 //   opts.sceneId / sceneName                不新建，只把这个场景放到 place
-//   st：选小人要借用同一个弹窗，选完带着填好的内容回来
+//   st：从地图工作台带入的初始设置
 async function sceneDialog(opts = {}, st = null) {
   st = st || { name: '', text: '', trigger: 0, once: true, exact: true, image: null, advanceTo: '' };
   const placing = !!opts.sceneId;
@@ -61,13 +61,13 @@ async function sceneDialog(opts = {}, st = null) {
           <span>怎么开始</span><div class="imodes">${TRIG_OPTS.map(([v, l]) => `<label class="switch"><input type="radio" name="spTrig" value="${v}" ${st.trigger === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
           ${ax && p.seg != null && p.seg >= 0 && hasNext ? `<label for="spAdv">播完以后</label><select id="spAdv"><option value="">不推进剧情</option>${ax.segs.map((l, i) => i > p.seg ? `<option value="${i}" ${String(st.advanceTo) === String(i) ? 'selected' : ''}>推进到${esc(l)}</option>` : '').join('')}</select>` : ''}
           <span>只播一次</span><label class="switch"><input type="checkbox" id="spOnce" ${st.once || st.trigger === 3 ? 'checked' : ''} ${st.trigger === 3 ? 'disabled' : ''}><span id="spOnceNote">${st.trigger === 3 ? '自动播的一定只播一次，不然会一直重复' : '播过以后这个格子就空了'}</span></label>
-          <span>小人</span><div class="imgrow"><span class="pspr" id="spImg"></span><span class="dim" id="spImgName" style="font-size:12.5px"></span><button type="button" class="small" id="spImgPick">选小人</button>${st.image ? '<button type="button" class="quiet small" id="spImgNone">不要小人</button>' : ''}</div>
+          <span>小人</span><div class="imgrow"><span class="pspr" id="spImg"></span><span class="dim" id="spImgName" style="font-size:12.5px"></span><button type="button" class="small" id="spImgPick">选小人</button><button type="button" class="quiet small" id="spImgNone" hidden>不要小人</button></div>
         </div>` : opts.link ? '' : '<div class="fnote">先放进场景库。以后在「剧情进度」里点地图上的空格子把它放到某一天，或者在事件的「选了 …」旁边点「关联场景」。</div>'}
       <div id="scErr"></div>
     </div>
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>${placing ? '放在这里' : p ? '新建并放在这里' : opts.link ? '新建并关联' : '新建场景'}</button></footer>`,
     (d, done) => {
-      if (!placing) { d.classList.add('dlg-wide'); d.addEventListener('close', () => d.classList.remove('dlg-wide'), { once: true }); }
+      if (!placing) d.classList.add('dlg-wide');
       $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
       const err = m => { $('#scErr', d).innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
       const ta = $('#scText', d);
@@ -200,11 +200,13 @@ async function sceneDialog(opts = {}, st = null) {
         advanceTo: $('#spAdv', d) ? $('#spAdv', d).value : st.advanceTo,
       });
       if (p) {
+        const pick = $('#spImgPick', d), none = $('#spImgNone', d), save = $('[data-ok]', d);
         const showImg = () => {
           const box = $('#spImg', d); box.innerHTML = '';
           const im = st.image;
+          none.hidden = !im?.characterName;
           if (im && im.characterName) {
-            loadSheet(im.characterName).then(sh => { if (!sh) return; const f = frameOf(sh, im.characterName, im.characterIndex, im.direction, im.pattern); const cv = document.createElement('canvas'); cv.width = f.pw; cv.height = f.ph; cv.className = 'sprcv'; cv.style.height = '48px'; cv.style.width = 48 * f.pw / f.ph + 'px'; cv.getContext('2d').drawImage(sh, f.sx, f.sy, f.pw, f.ph, 0, 0, f.pw, f.ph); box.appendChild(cv); });
+            loadSheet(im.characterName).then(sh => { if (!sh || !d.open || st.image !== im) return; const f = frameOf(sh, im.characterName, im.characterIndex, im.direction, im.pattern); const cv = document.createElement('canvas'); cv.width = f.pw; cv.height = f.ph; cv.className = 'sprcv'; cv.style.height = '48px'; cv.style.width = 48 * f.pw / f.ph + 'px'; cv.getContext('2d').drawImage(sh, f.sx, f.sy, f.pw, f.ph, 0, 0, f.pw, f.ph); box.appendChild(cv); });
             $('#spImgName', d).textContent = im.characterName + (isBigSheet(im.characterName) ? '' : ' 第 ' + ((im.characterIndex || 0) + 1) + ' 个');
           } else { box.innerHTML = '<span class="pnone">无</span>'; $('#spImgName', d).textContent = '不显示（看不见的触发点）'; }
         };
@@ -215,8 +217,18 @@ async function sceneDialog(opts = {}, st = null) {
           if (auto) { once.checked = true; once.disabled = true; $('#spOnceNote', d).textContent = '自动播的一定只播一次，不然会一直重复'; }
           else { once.disabled = false; $('#spOnceNote', d).textContent = '播过以后这个格子就空了'; }
         });
-        $('#spImgPick', d).onclick = () => done({ pick: snap() });
-        if ($('#spImgNone', d)) $('#spImgNone', d).onclick = () => done({ again: { ...snap(), image: null } });
+        pick.onclick = async () => {
+          const im = st.image || {};
+          pick.disabled = none.disabled = save.disabled = true;
+          try {
+            const sp = await spritePicker({ name: im.characterName, index: im.characterIndex, dir: im.direction, pattern: im.pattern }, { title: '场景的小人', parent: d });
+            if (!d.open || !sp) return;
+            st.image = sp.name ? { characterName: sp.name, characterIndex: sp.index, direction: sp.dir, pattern: sp.pattern } : null;
+            showImg();
+          } catch (e) { if (d.open) err(e.message); }
+          finally { if (d.open) { pick.disabled = none.disabled = save.disabled = false; pick.focus({ preventScroll: true }); } }
+        };
+        none.onclick = () => { st.image = null; showImg(); };
       }
       $('[data-ok]', d).onclick = async () => {
         err('');
@@ -233,12 +245,6 @@ async function sceneDialog(opts = {}, st = null) {
         } catch (e) { btn.disabled = false; err(e.message); }
       };
     });
-  if (r && r.pick) {
-    const cur = r.pick.image || {};
-    const sp = await spritePicker({ name: cur.characterName, index: cur.characterIndex, dir: cur.direction, pattern: cur.pattern }, { title: '场景的小人' });
-    return sceneDialog(opts, { ...r.pick, image: sp ? { characterName: sp.name, characterIndex: sp.index, direction: sp.dir, pattern: sp.pattern } : r.pick.image });
-  }
-  if (r && r.again) return sceneDialog(opts, r.again);
   if (!r || (!r.id && !r.placed)) return;
   S.lookups = {};
   if (r.placed) {
