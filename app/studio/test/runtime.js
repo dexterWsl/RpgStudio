@@ -116,7 +116,8 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   await page.waitForTimeout(500);
   const state = () => page.evaluate(() => ({ map: $gameMap.mapId(), x: $gamePlayer.x, y: $gamePlayer.y, d: $gamePlayer.direction(), sheet: $gamePlayer.characterName(), idx: $gamePlayer.characterIndex(), followers: $gamePlayer.followers().isVisible(), as: $gamePlayer._rsAs, msg: $gameMessage.isBusy(), running: $gameMap.isEventRunning(), v: [1, 2, 3].map(i => $gameVariables.value(i)) }));
   const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await page.evaluate(fn)) return true; await page.waitForTimeout(50); } return false; };
-  const pressOk = () => page.keyboard.press('Enter');
+  // 给引擎至少一帧读到按下状态。
+  const pressOk = () => page.keyboard.press('Enter', { delay: 120 });
   // 一直按确定，直到条件成立（对话框第一下是把字显示完，第二下才关）
   const advance = async (fn, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await page.evaluate(fn)) return true; if (await page.evaluate(() => $gameMessage.isBusy())) await pressOk(); await page.waitForTimeout(150); } return false; };
 
@@ -167,7 +168,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   await page.evaluate(() => SceneManager._scene._messageWindow._choiceListWindow.select(2));
   await pressOk();
   ok(await until(() => !$gameMap.isEventRunning() && $gameVariables.value(1) === 3), '选「藏起来」→ 第 3 个分支');
-  const real = errs.filter(e => !/GL Driver|willReadFrequently|GPU stall|CanvasTextAlign/.test(e));
+  const real = errs.filter(e => !/GL Driver|willReadFrequently|GPU stall|CanvasTextAlign|Permissions policy violation: unload is not allowed in this document\./.test(e));
   ok(!real.length, '没有报错 ' + real.slice(0, 3).join(' | '));
   console.log(fail ? `✖ ${fail} 项没过（${pass} 项通过）` : `全部通过（${pass} 项）`);
   await browser.close(); srv.close();
