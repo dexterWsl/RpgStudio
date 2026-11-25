@@ -28,7 +28,7 @@ async function viewSettlements(main, selectedId) {
   }).join('');
   main.innerHTML = `<div class="page"><div class="titlebar"><h1>结算组</h1><span class="sp"></span>
     ${canWrite ? '<button class="primary small" id="newSettlement">新建结算组</button>' : ''}</div>
-    <p class="dim">逐行写物品、变量和开关指令，可以加条件。写剧情时用 <code>#结算 组名</code> 调用。</p>
+    <p class="dim">逐行写奖励、队伍、变量和开关指令，可以加条件。写剧情时用 <code>#结算 组名</code> 调用。</p>
     <div class="settlement-list">${cards || '<div class="empty">还没有结算组</div>'}</div></div>`;
   const edit = async group => {
     try {
@@ -57,23 +57,42 @@ async function viewSettlements(main, selectedId) {
   }
 }
 
-function settlementDialog(group) {
+async function collectSettlementSelection(text) {
+  const source = text.value;
+  const { selectionStart, selectionEnd } = text;
+  if (!source.slice(selectionStart, selectionEnd).trim()) { toast('先选中要收进结算组的指令', true); return; }
+  const first = selectionStart === 0 ? 0 : source.lastIndexOf('\n', selectionStart - 1) + 1;
+  const nextLine = source.indexOf('\n', source[selectionEnd - 1] === '\n' ? selectionEnd - 1 : selectionEnd);
+  const last = nextLine < 0 ? source.length : nextLine;
+  const selected = source.slice(first, last);
+  const body = selected.split('\n').map(line => line.replace(/^[\t ]*(?:│ ?)+/, '')).join('\n').trim();
+  const indent = /^[\t │]*/.exec(selected)[0];
+  const saved = await settlementDialog(null, { selectedText: body });
+  if (!saved || !text.isConnected || text.value !== source) return;
+  text.setRangeText(indent + '#结算 ' + saved.name, first, last, 'end');
+  text.focus({ preventScroll: true });
+  text.dispatchEvent(new Event('input', { bubbles: true }));
+  toast('已保存结算组并替换选中的指令');
+}
+
+function settlementDialog(group, { selectedText } = {}) {
   const example = '#如果 变量 好感度 >= 3\n  #物品 药水 +1\n  #变量 好感度 +1\n#否则\n  #开关 等待交付 开\n#条件结束';
   const tools = [['item', '物品'], ['var', '变量'], ['switch', '开关'], ['if', '如果']];
-  return openDialog(`<header><h3>${group ? '编辑结算组' : '新建结算组'}</h3><button type="button" class="small" data-group-impact>影响范围</button></header>
+  return openDialog(`<header><h3>${selectedText != null ? '收成结算组' : group ? '编辑结算组' : '新建结算组'}</h3><button type="button" class="small" data-group-impact>影响范围</button></header>
     <div class="dbody"><div class="fgrid"><label for="settlementName">组名</label>
       <input id="settlementName" maxlength="40" value="${esc(group?.name || '')}" placeholder="例如 交付任务奖励"></div>
       <div class="edins" role="toolbar" aria-label="插入"><span class="edins-k">插入</span>
         ${tools.map(([kind, label]) => `<button type="button" class="small" data-settlement-insert="${kind}">${label}</button>`).join('')}</div>
       <div class="settlement-pick" hidden></div>
-      <textarea class="settlement-source" aria-label="结算指令" spellcheck="false" placeholder="${esc(example)}">${esc(group?.text || '')}</textarea>
-      <details class="helpbox"><summary>写法</summary><p class="dim">名称也可以写编号。用「并且」「或者」连接条件，<code>#结束</code> 也可以收尾。</p>
-        <pre class="settlement-script">${esc(example)}</pre></details>
+      <textarea class="settlement-source" aria-label="结算指令" spellcheck="false" placeholder="${esc(example)}">${esc(selectedText ?? group?.text ?? '')}</textarea>
+      ${selectedText == null ? '' : '<p class="dim">保存结算组后，会将选中的指令替换成一条结算调用。然后可继续编辑和保存当前事件。</p>'}
+      ${writingHelp({ settlement: true })}
       <div id="settlementError" role="alert"></div></div>
-    <footer><span class="sp"></span><button type="button" data-x>取消</button><button type="button" class="primary" data-ok>保存结算组</button></footer>`, (d, done) => {
+    <footer><span class="sp"></span><button type="button" data-x>取消</button><button type="button" class="primary" data-ok>${selectedText == null ? '保存结算组' : '保存并替换'}</button></footer>`, (d, done) => {
     const name = $('#settlementName', d), text = $('.settlement-source', d), pick = $('.settlement-pick', d);
     const save = $('[data-ok]', d), cancel = $('[data-x]', d), preview = $('[data-group-impact]', d), gen = d._gen;
     const toolbar = $('.edins', d);
+    bindWritingHelp(d);
     let saving = false, reading = false, pickVersion = 0;
     const active = () => d.open && d._gen === gen;
     const fail = msg => { $('#settlementError', d).innerHTML = msg ? '<div class="err">' + esc(msg) + '</div>' : ''; };
@@ -161,7 +180,7 @@ function showSettlementImpact(name, { targets, callers }) {
     <div class="dbody"><p class="dim">列出本组会修改的目标和相关事件。条件里的指令只在对应分支执行。</p>
       ${targets.map((t, ti) => `<details class="impact-group" open><summary>${esc(t.label)} <span class="dim">${t.refs.length} 处关联</span></summary>
         <ul class="group-impact-actions">${t.actions.map((a, ai) => `<li><code>${esc(a.text)}</code><span class="dim">第 ${a.line} 行${a.conditional ? ' · 条件内' : ''}</span>
-          ${t.kind === 'item' ? '' : `<button type="button" class="small quiet" data-try="${ti}:${ai}">试算</button>`}</li>`).join('')}</ul>
+          ${['var', 'switch'].includes(t.kind) ? `<button type="button" class="small quiet" data-try="${ti}:${ai}">试算</button>` : ''}</li>`).join('')}</ul>
         ${t.refs.length ? `<ul>${links(t.refs)}</ul>` : '<p class="dim">未找到其他事件引用。</p>'}</details>`).join('')}
       ${callers.length ? `<details class="impact-group"><summary>调用此结算组 <span class="dim">${callers.length} 处</span></summary><ul>${links(callers)}</ul></details>` : ''}</div>`;
   document.body.appendChild(d);

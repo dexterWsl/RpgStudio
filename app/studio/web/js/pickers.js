@@ -175,15 +175,15 @@ async function transferDialog(defaultMapId, o = {}) {
     return n && !/^\d+$/.test(n) && maps.filter(x => String(x.name || '').trim() === n).length === 1 ? n : String(id);
   };
   const names = actors.map(a => String(a.name || '').trim()).filter(Boolean);
-  return openDialog(`<header><h3>${ini ? '传送到这里' : o.scene ? '场景里传送到哪里' : '传送到哪里'}</h3><button class="quiet small" data-x>关闭</button></header>
+  return openDialog(`<header><h3>${esc(o.title || (ini ? '传送到这里' : o.scene ? '场景里传送到哪里' : '传送到哪里'))}</h3><button class="quiet small" data-x>关闭</button></header>
     <div class="dbody">
       <div class="fgrid">
         <label for="tpmap">地图</label><select id="tpmap">${maps.map(m => `<option value="${m.id}" ${m.id === mapId ? 'selected' : ''}>${m.id} ${esc(m.name || '（没名字）')}</option>`).join('')}</select>
         ${o.scene ? `<label for="tpwho">谁来演</label><select id="tpwho"><option value="">主角（不换人）</option>${[...new Set([...names, ...(ini && ini.who ? [ini.who] : [])])].map(n => `<option ${ini && ini.who === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
-        <label for="tpdir">到了朝</label><select id="tpdir"><option value="">不变</option>${['上', '下', '左', '右'].map(d => `<option ${ini && ini.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>
+        ${o.coordinateOnly ? '' : `<label for="tpdir">到了朝</label><select id="tpdir"><option value="">不变</option>${['上', '下', '左', '右'].map(d => `<option ${ini && ini.dir === d ? 'selected' : ''}>${d}</option>`).join('')}</select>`}
         ${o.scene || (ini && ini.steps) ? `<label for="tpsteps">到了以后</label><input id="tpsteps" placeholder="可以不写；比如 前进3 或 下2 转身" value="${esc((ini && ini.steps) || '')}">` : ''}
       </div>
-      <div class="fnote">${o.scene ? '场景里的传送只在这个场景里算数：场景播完，主角自动回到进场景前的地方、换回原来的样子。' : '主角传送过去（场景外的传送就是主角自己）。'}</div>
+      ${o.coordinateOnly ? '' : `<div class="fnote">${o.scene ? '场景里的传送只在这个场景里算数：场景播完，主角自动回到进场景前的地方、换回原来的样子。' : '主角传送过去（场景外的传送就是主角自己）。'}</div>`}
       <div class="tpbox" id="tpbox"></div>
     </div>
     <footer><span class="sp"></span><span class="dim" id="tphint">在地图上点一下要去的格子</span><button data-x>取消</button><button class="primary" data-ok disabled>${ini ? '确定' : '就是这一格'}</button></footer>`,
@@ -277,12 +277,11 @@ async function scenePicker() {
 }
 
 // 气泡：选形状 + 冒在谁头上。
-//   主角 / 本事件 → 原生的「显示气泡」(213)；别人头上 → 移动路线里的气泡步骤（#动作 名字 气泡 ♥）
+//   主角 / 本事件保留原生气泡，指定人物由演出指令处理。
 const BALLOON_SHAPES = ['！', '？', '♪', '♥', '怒', '汗', '乱', '…', '灯', 'Zzz'];
 function balloonTextFor(who, sym) {
   if (who === '主角') return '#气泡 ' + sym;
-  if (who === '本事件') return '#气泡 ' + sym + ' 本事件';
-  return '#动作 ' + who + ' ' + sym;   // 移动路线里的气泡步骤就是那个符号本身
+  return '#气泡 ' + sym + ' ' + who;
 }
 async function balloonLine(defaultWho = '本事件') {
   const actors = await lookup('actor').then(rows => rows.map(a => String(a.name || '').trim()).filter(Boolean)).catch(() => []);

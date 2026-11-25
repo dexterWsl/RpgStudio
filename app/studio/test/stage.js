@@ -47,7 +47,7 @@ const sceneLines = [
   `#传送 ${mapRef} 7 8 下2`,
   `#扮演 ${who}`,
   '#扮演 主角',
-  `#动作 ${who} 前进3 不等`,
+  `#移动 ${who} 前进3 不等`,
 ];
 const scene = merge([MARK_CMD(), END()], sceneLines.join('\n'));
 ok(JSON.stringify(textOf(scene)) === JSON.stringify(sceneLines), '场景里写了再读出来要一样：\n  ' + textOf(scene).join('\n  '));

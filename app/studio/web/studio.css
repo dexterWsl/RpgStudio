@@ -158,7 +158,7 @@ body>header{flex:none;display:flex;align-items:center;gap:12px;padding:8px 14px;
 .stage .hit{position:absolute;inset:0;touch-action:none}
 .mode-events .stage .hit{cursor:copy}
 .mode-tiles .stage .hit,.mode-regions .stage .hit,.mode-height .stage .hit{cursor:crosshair}
-.evlayer{position:absolute;inset:0;pointer-events:none}
+.evlayer{position:absolute;inset:0;z-index:2;pointer-events:none}
 .evlayer .evbtn{pointer-events:auto;touch-action:none}
 .mode-tiles .evlayer .evbtn,.mode-regions .evlayer .evbtn,.mode-height .evlayer .evbtn{pointer-events:none;opacity:.5}
 .cursorbox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.8),inset 0 0 0 1px rgba(0,0,0,.6);pointer-events:none;border-radius:2px;z-index:6}

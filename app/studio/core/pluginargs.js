@@ -12,6 +12,7 @@
 // 显示文字不一样、参数里有换行……）还是照旧显示成 ■（只读）。
 const fs = require('fs');
 const path = require('path');
+const animated = require('./animated-portrait.js');
 
 const RE_COMMAND = /^@command\s+(\S+)/;
 const RE_ARG = /^@arg\s+(\S+)/;
@@ -65,14 +66,18 @@ function splitValues(body) {
 const fileCache = new Map();   // 插件文件 → { key: 修改时间+大小, cmds }
 
 function createPluginArgs(project, opts = {}) {
-  const mz = opts.mz !== false;   // MV 的插件指令是一行自由文本（356），这里先只管 MZ
+  const mz = opts.mz !== false;   // MV 的指令没有通用参数表，内置动图插件声明自己的格式。
+  const portrait = name => name === animated.ENTRY.name;
+  const portraitVisibility = cmd => cmd === 'show' || cmd === 'hide';
 
   function schemaOf(plugin) {
-    if (!mz) return null;
     const name = String(plugin || '');
+    if (!mz && !portrait(name)) return null;
     if (!name || name.includes('..') || /[\\/:]/.test(name)) return null;
     let file;
-    try { file = path.join(project.gameRoot(), 'js', 'plugins', name + '.js'); } catch { return null; }
+    try {
+      file = portrait(name) && animated.used(project.sys()) ? animated.SOURCE : path.join(project.gameRoot(), 'js', 'plugins', name + '.js');
+    } catch { return null; }
     let st;
     try { st = fs.statSync(file); } catch { return null; }
     const key = st.mtimeMs + ':' + st.size;
@@ -129,6 +134,14 @@ function createPluginArgs(project, opts = {}) {
       const v = it.values[i];
       return v === undefined || v === '' ? (a.def == null ? '' : a.def) : v;
     });
+    if (portrait(it.plugin) && it.cmd === 'motion') {
+      if (!Object.hasOwn(animated.STATES, values[0]) || !/^[1-9]\d{0,2}$/.test(values[1]) || Number(values[1]) > 600) {
+        throw new Error('动态立绘的状态为 idle、walk、attack 或 hit，持续帧数为 1～600');
+      }
+    }
+    if (!mz && portrait(it.plugin) && (it.cmd === 'motion' || portraitVisibility(it.cmd))) {
+      return [{ code: 356, indent: 0, parameters: [[it.plugin, it.cmd, ...values].join(' ')] }];
+    }
     const args = {};
     spec.args.forEach((a, i) => { args[a.key] = values[i]; });
     return [
@@ -141,7 +154,16 @@ function createPluginArgs(project, opts = {}) {
   // 同一条指令会被问好几次（能不能编辑、怎么显示、合并时再核一遍），按对象记一下
   const lineCache = new WeakMap();
   function lineOf(c) {
-    if (!mz || !c || c.code !== 357) return '';
+    if (!c) return '';
+    if (!mz && c.code === 356) {
+      const command = c.parameters?.[0];
+      const m = /^RpgStudio_AnimatedPortrait motion (idle|walk|attack|hit) ([1-9]\d{0,2})$/.exec(command);
+      if (m && Number(m[2]) <= 600 && specOf(animated.ENTRY.name, 'motion')) return '#插件 ' + animated.ENTRY.name + ' motion（' + m[1] + '，' + m[2] + '）';
+      const visibility = /^RpgStudio_AnimatedPortrait (show|hide)$/.exec(command);
+      if (visibility && specOf(animated.ENTRY.name, visibility[1])) return '#插件 ' + command;
+      return '';
+    }
+    if (!mz || c.code !== 357) return '';
     if (lineCache.has(c)) return lineCache.get(c);
     const line = computeLine(c);
     lineCache.set(c, line);

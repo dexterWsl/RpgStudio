@@ -5,6 +5,7 @@
 const { need, int, clone, UserError } = require('../lib/util.js');
 const Maps = require('../core/maps.js');
 const Effects = require('../core/map-effects.js');
+const Enemies = require('../core/map-enemies.js');
 const marks = require('../core/marks.js');
 module.exports = function (ctx) {
   const { project, hint, tools, backupsDir } = ctx;
@@ -17,7 +18,7 @@ module.exports = function (ctx) {
     const m = project.map(id);
     need(m, '地图 ' + id + ' 不存在');
     const info = project.mapList().find(x => x.id === id) || {};
-    const note = Effects.mapNote(m.note);
+    const note = Enemies.stripNote(Effects.mapNote(m.note));
     const events = (m.events || []).filter(Boolean).map(e => ({
       id: e.id, name: e.name, x: e.x, y: e.y,
       hint: hint(`map:${id}/ev:${e.id}`),
@@ -213,7 +214,10 @@ module.exports = function (ctx) {
         need(m && info, '地图 ' + id + ' 不存在');
         if (b.name != null) { const n = String(b.name).trim().slice(0, 40); need(n, '名字不能为空'); info.name = n; }
         if (b.displayName != null) m.displayName = String(b.displayName).slice(0, 40);
-        if (b.note != null && b.note !== Effects.mapNote(m.note)) m.note = Effects.writeMapNote(m.note, String(b.note).slice(0, 4000));
+        if (b.note != null && b.note !== Enemies.stripNote(Effects.mapNote(m.note))) {
+          const note = Effects.writeMapNote(m.note, String(b.note).slice(0, 4000));
+          m.note = Enemies.carryConfig(m.note, note);
+        }
         if (b.parallaxName != null) m.parallaxName = String(b.parallaxName).slice(0, 200);
         if (b.bgmName != null) { m.bgm = { ...(m.bgm || { pan: 0, pitch: 100, volume: 90 }), name: String(b.bgmName).slice(0, 200) }; m.autoplayBgm = !!String(b.bgmName).trim(); }
         if (b.bgsName != null) { m.bgs = { ...(m.bgs || { pan: 0, pitch: 100, volume: 90 }), name: String(b.bgsName).slice(0, 200) }; m.autoplayBgs = !!String(b.bgsName).trim(); }

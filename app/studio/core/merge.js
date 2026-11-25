@@ -35,18 +35,28 @@
 const EDITABLE = new Set([101, 401, 231, 235, 230, 121, 122, 126, 201, 221, 222, 223, 225, 241, 242, 245, 246, 250, 213, 117, 211, 322, 214, 123, 354, 204, 224, 236]);
 // 演出插件（#飘字 #动作）的插件指令，连同后面「谁 = …」那几行续行，也能放进编辑框
 const { isStageCmd } = require('./stage.js');
+const { basicCodes, isQuestCommand } = require('./gameplay-commands.js');
+const { isImmunityCommand } = require('./encounter-commands.js');
+const { readShop, carryStockId, sameShop, shopStart, shopEnd } = require('./shop.js');
+const layeredCue = require('./layered-cues.js');
+const { readPicture: readLayeredPortrait } = require('./layered-portrait.js');
+const gameplayCodes = new Set(basicCodes);
+const immunityAt = (list, i) => isImmunityCommand(list[i]) && list[i + 1]?.code !== 655;
+const shopAt = (list, i) => !!readShop(list[i]) && list[i + 1]?.code !== 655;
+const shopCommand = command => command?.code === 302 || !!readShop(command);
+const isMultiPlugin = c => isStageCmd(c) || isQuestCommand(c);
 const { isMarked: isSceneList } = require('./scenes.js');
 const stageAt = (list, i) => {
   const c = list[i];
-  if (isStageCmd(c)) return true;
+  if (isMultiPlugin(c)) return true;
   if (!c || c.code !== 657) return false;
   let k = i - 1;
   while (k >= 0 && list[k].code === 657) k--;
-  return k >= 0 && list[k].code === 357 && isStageCmd(list[k]);
+  return k >= 0 && list[k].code === 357 && isMultiPlugin(list[k]);
 };
 const { DIR_TEXT } = require('./stage.js');
 const choicecond = require('./choicecond.js');
-const isBust = name => /^立绘\//.test(String(name || ''));
+const isBust = name => /^立绘\//.test(String(name || '')) || !!readLayeredPortrait(name);
 const OPS = ['=', '+', '-', '*', '/', '%'];
 const KEEP = '#原样 ';
 const ANCHOR = '■';
@@ -94,19 +104,33 @@ function pictureRules(opts = {}) {
   const pluginAt = (list, i) => {
     const c = list[i];
     if (!c) return false;
-    if (c.code === 357) return !!isPlugin(c);
+    if (c.code === 356 || c.code === 357) return !!isPlugin(c);
     if (c.code !== 657) return false;
     let k = i - 1;
     while (k >= 0 && list[k].code === 657) k--;
     return k >= 0 && list[k].code === 357 && !!isPlugin(list[k]);
   };
   // 这一条能不能放进编辑框（脚本只认「关闭全部图片」这一句，而且后面没有续行）
-  const editableAt = (list, i) => !!list[i] && (EDITABLE.has(list[i].code) || stageAt(list, i) || pluginAt(list, i) || (isClearAll(list[i]) && !(list[i + 1] && list[i + 1].code === 655)));
+  const editableAt = (list, i) => {
+    const c = list[i];
+    if (!c) return false;
+    if (c.code === 605) {
+      let k = i - 1;
+      while (k >= 0 && list[k].code === 605) k--;
+      return list[k]?.code === 302 && list[k].indent === c.indent;
+    }
+    return EDITABLE.has(c.code) || gameplayCodes.has(c.code) || immunityAt(list, i) || shopAt(list, i) || stageAt(list, i) || pluginAt(list, i) ||
+      ((isClearAll(c) || layeredCue.read(c)) && list[i + 1]?.code !== 655);
+  };
   const picApply = (st, c) => {
     if (!c) return;
-    if (c.code === 231) { st.slots.set(c.parameters[0], c.parameters[1]); st.last = c.parameters[0]; st.shows.push({ id: c.parameters[0], name: c.parameters[1] }); }
-    else if (c.code === 235) st.slots.delete(c.parameters[0]);
-    else if (isClearAll(c)) st.slots.clear();
+    const p = c.parameters || [], id = p[0];
+    if (c.code === 231) {
+      st.slots.set(id, p[1]); st.last = id; st.shows.push({ id, name: p[1] });
+      if (p[3] === 0) st.positions?.set(id, [p[4], p[5]]);
+      else st.positions?.delete(id);
+    } else if (c.code === 235) { st.slots.delete(id); st.positions?.delete(id); }
+    else if (isClearAll(c)) { st.slots.clear(); st.positions?.clear(); }
   };
   const blockRange = list => {
     const idx = [];
@@ -122,7 +146,7 @@ const GENERIC_PICS = pictureRules();
 
 // 图片状态：图片编号 → 正在显示的图名
 //   shows：按顺序记下每一次「#图」显示的图（第 N 个 = 图片N），用来按顺序关图
-const newPicState = from => ({ slots: new Map(from ? from.slots : []), last: from ? from.last : null, shows: from ? from.shows.slice() : [] });
+const newPicState = from => ({ slots: new Map(from?.slots), positions: new Map(from?.positions), last: from?.last ?? null, shows: from ? from.shows.slice() : [] });
 
 const fmtSec = frames => String(Math.round((Number(frames) / 60) * 100) / 100);
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -137,9 +161,16 @@ function segmentText(text) {
   const segs = [];
   let cur = null;
   let flow = null;        // 正在收集的 #如果 块：整块当成一个片段
+  let shop = null;
   for (const line of String(text || '').replace(/\r/g, '').split('\n')) {
     const t = line.trim();
     if (!t) continue;
+    if (shop) { shop.text += '\n' + t; if (shopEnd.test(t)) shop = null; continue; }
+    if (shopStart.test(t)) {
+      if (flow) { flow.text += '\n' + t; shop = flow; }
+      else segs.push(cur = shop = { kind: 'mark', text: t });
+      continue;
+    }
     if (flow) {
       flow.text += '\n' + t;
       if (RE_IF_END.test(t)) { if (--flow.depth === 0) flow = null; }
@@ -205,7 +236,7 @@ function createMerger(ctx) {
   const OTHER_KIND = { 231: 'pic', 235: 'clear', 355: 'clear', 230: 'wait', 121: 'switch', 122: 'var', 126: 'item', 201: 'transfer',
     221: 'fade', 222: 'fade', 223: 'tint', 225: 'shake', 241: 'bgm', 242: 'bgm', 245: 'bgs', 246: 'bgs', 250: 'se', 213: 'balloon', 117: 'call', 211: 'transparent', 322: 'look', 214: 'erase', 123: 'selfsw', 354: 'title',
     204: 'camera', 224: 'flash', 236: 'weather' };
-  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'settlement', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'act', 'plugin']);
+  const STAGING = new Set(['fade', 'tint', 'shake', 'bgm', 'bgs', 'se', 'balloon', 'caption', 'call', 'settlement', 'transparent', 'look', 'erase', 'selfsw', 'title', 'camera', 'flash', 'weather', 'float', 'speech', 'act', 'plugin', 'gameplay', 'layeredCue']);
 
   // 一条非台词指令在编辑框里的那一行；确认「这一行再解析回去」能得到同样的核心内容，否则写成 #原样
   function otherLine(c) {
@@ -307,15 +338,21 @@ function createMerger(ctx) {
         segs.push({ kind: 'say', head, speakerRaw, speaker, lines, raw, text });
         continue;
       }
-      if (isStageCmd(c) || (ctx.isPluginCmd && ctx.isPluginCmd(c))) {
+      if (gameplayCodes.has(c.code) || immunityAt(list, i) || shopAt(list, i) || isMultiPlugin(c) || (ctx.isPluginCmd && ctx.isPluginCmd(c))) {
         // 插件指令 + 续行算一行；再解析回去必须一模一样（续行也算），否则写成 #原样
         const raw = [c];
         let k = i + 1;
         if (c.code === 357) while (k <= last && list[k].code === 657) raw.push(list[k++]);
-        const sl = ctx.stagingLine ? ctx.stagingLine(c, st) : '';
+        if (c.code === 302) while (k <= last && list[k].code === 605) raw.push(list[k++]);
+        const sl = (ctx.gameplayLine && ctx.gameplayLine(c, raw)) || (ctx.stagingLine ? ctx.stagingLine(c, st) : '');
         let it = null, ok = false;
-        try { it = sl ? (ctx.parseScript(sl) || [])[0] : null; const back = it ? ctx.stagingCommand(it) : null; ok = !!back && back.length === raw.length && back.every((b, n) => sameCmds({ ...b, indent: raw[n].indent }, raw[n])); } catch { ok = false; }
-        segs.push({ kind: ok ? it.type : 'other', raw, text: ok ? sl : KEEP + ctx.describe(c) });
+        try {
+          it = sl ? (ctx.parseScript(sl) || [])[0] : null;
+          const back = it ? ctx.stagingCommand(it) : null;
+          if (back) carryStockId(back[0], c);
+          ok = !!back && back.length === raw.length && back.every((b, n) => sameCmds({ ...b, indent: raw[n].indent }, raw[n]) || sameShop(b, raw[n]));
+        } catch { ok = false; }
+        segs.push({ kind: ok ? (shopCommand(c) ? 'shop' : it.type) : 'other', raw, text: ok ? sl : KEEP + ctx.describe(c) });
         i = k;
         continue;
       }
@@ -393,7 +430,7 @@ function createMerger(ctx) {
       if (B[j].kind === 'mark') {
         let it = null;
         try { it = (ctx.parseScript(B[j].text) || [])[0]; } catch { }
-        if (it && it.type !== 'say') want = it.type;
+        if (it && it.type !== 'say') want = shopCommand(it.commands?.[0]) ? 'shop' : it.type;
         B[j].item = it;
       }
       if (!want) continue;
@@ -461,10 +498,11 @@ function createMerger(ctx) {
       // # 标记
       if (seg.text.startsWith(KEEP.trim())) throw new Error('「#原样」行只能删除或挪位置，不能改内容：' + seg.text);
       const it = seg.item || (ctx.parseScript(seg.text) || [])[0];
-      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '（# 开头的只能是 #图 #清图 #等待 #开关 #变量 #物品 #传送 #选项，演出 #淡出 #淡入 #音乐 #停音乐 #环境音 #音效 #色调 #震动 #气泡 #字幕 #透明 #行走图 #镜头 #天气 #闪光，人物 #飘字 #动作 #扮演，立绘 #立绘 #退场，#场景 #结算，#如果 条件 / #否则 / #结束，#插件 插件名 指令名（参数…））');
+      if (!it || it.type === 'say') throw new Error('看不懂这一行：' + seg.text + '。请在「写法」查看可用的指令。');
       if (it.type === 'bust' || it.type === 'unbust') {
-        if (it.type === 'bust' && !ctx.picExists(it.who ? '立绘/' + it.who + '_' + it.face : '')) throw new Error('立绘不存在：img/pictures/立绘/' + it.who + '_' + it.face + '（先把图放进去，或者用「导入素材」）');
-        emit((it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st)).map(at));
+        const commands = it.type === 'bust' ? ctx.bustCommands(it, st) : ctx.unbustCommands(it, st);
+        if (it.type === 'bust' && !ctx.picExists(commands.at(-1).parameters[1])) throw new Error('找不到「' + it.who + '」的立绘表情「' + it.face + '」');
+        emit(commands.map(at));
         continue;
       }
       if (it.type === 'caption') {
@@ -485,6 +523,7 @@ function createMerger(ctx) {
       }
       if (STAGING.has(it.type)) {
         const cmds = ctx.stagingCommand(it);
+        if (tpl?.kind === 'shop') carryStockId(cmds[0], tpl.raw[0]);
         // 改的是原来那一行：声音沿用原来的声像 / 音调
         if (tpl && tpl.raw[0] && [241, 245, 250].includes(tpl.raw[0].code) && cmds[0].parameters[0] && tpl.raw[0].code === cmds[0].code) {
           const o = tpl.raw[0].parameters[0] || {};

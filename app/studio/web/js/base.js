@@ -181,3 +181,9 @@ async function lookup(kind) {
   return S.lookups[kind];
 }
 const options = (rows, sel) => rows.map(r => `<option value="${r.id}" ${Number(sel) === r.id ? 'selected' : ''}>${r.id} ${esc(r.name || '')}</option>`).join('');
+
+function valueOptions(rows, selected, zeroLabel) {
+  const entries = zeroLabel ? [{ id: 0, name: zeroLabel }, ...rows] : rows;
+  const fallback = selected != null && !entries.some(r => r.id === selected) ? [{ id: selected, name: '编号 ' + selected }] : [];
+  return [...entries, ...fallback].map(row => `<option value="${esc(row.id)}" ${row.id === selected ? 'selected' : ''}>${esc(row.name)}</option>`).join('');
+}

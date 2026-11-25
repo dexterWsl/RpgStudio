@@ -12,18 +12,19 @@ function installRuntimePlugin(root, backupsDir, { entry, source, backupPrefix })
   try { entries = JSON.parse(list.slice(start, end + 1)); } catch { }
   need(Array.isArray(entries), '读不懂游戏的 js/plugins.js，无法启用「' + entry.description + '」。');
   const installed = entries.find(p => p && p.name === entry.name);
+  if (!installed && entry.status === false) return;
   let next = list;
   if (!installed) {
     next = list.slice(0, end).trimEnd() + (entries.length ? ',\n' : '\n') + JSON.stringify(entry) + '\n' + list.slice(end);
-  } else if (!installed.status) {
-    installed.status = true;
+  } else if (installed.status !== entry.status) {
+    installed.status = entry.status;
     next = list.slice(0, start) + '[\n' + entries.map(p => JSON.stringify(p)).join(',\n') + '\n' + list.slice(end);
   }
 
   const file = path.join(root, 'js/plugins', entry.name + '.js');
   const src = fs.readFileSync(source, 'utf8');
   const exists = fs.existsSync(file);
-  const replace = !exists || fs.readFileSync(file, 'utf8') !== src;
+  const replace = entry.status !== false && (!exists || fs.readFileSync(file, 'utf8') !== src);
   if (!replace && next === list) return;
   const backupRoot = path.resolve(backupsDir);
   fs.mkdirSync(backupRoot, { recursive: true });
@@ -46,4 +47,12 @@ function installRuntimePlugin(root, backupsDir, { entry, source, backupPrefix })
   if (next !== list) write(listFile, next);
 }
 
-module.exports = { installRuntimePlugin };
+function ensureRuntimePlugin(ctx, plugin) {
+  const root = ctx.project.gameRoot();
+  need(fs.existsSync(path.join(root, 'js/plugins.js')), '这项功能需要带有 js/plugins.js 的完整游戏工程');
+  if (ctx.workDataDir()) return;
+  const backups = ctx.backupsDir() || path.join(root, 'backups', 'studio');
+  installRuntimePlugin(root, backups, { entry: plugin.ENTRY, source: plugin.SOURCE, backupPrefix: plugin.ENTRY.name });
+}
+
+module.exports = { installRuntimePlugin, ensureRuntimePlugin };

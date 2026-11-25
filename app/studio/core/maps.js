@@ -62,4 +62,9 @@ function passable(m, flags, x, y) {
 
 const sizeOk = (w, h) => Number.isInteger(w) && Number.isInteger(h) && w >= 1 && h >= 1 && w <= MAX_SIZE && h <= MAX_SIZE;
 
-module.exports = { checkData, resizeData, newMap, hashData, sizeOk, passable, MAX_SIZE };
+function freeEventId(map) {
+  const free = map.events.findIndex((event, index) => index > 0 && !event);
+  return free > 0 ? free : Math.max(map.events.length, 1);
+}
+
+module.exports = { checkData, resizeData, newMap, hashData, sizeOk, passable, freeEventId, MAX_SIZE };

@@ -7,6 +7,8 @@ const { TRIGGERS, PRIORITIES, CE_TRIGGERS } = require('../core/commands.js');
 const choicecond = require('../core/choicecond.js');
 const marks = require('../core/marks.js');
 const { isSettlement } = require('../core/settlements.js');
+const { freeEventId } = require('../core/maps.js');
+const { interactionList } = require('../core/npc.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -310,8 +312,7 @@ module.exports = function (ctx) {
         need(m, '地图 ' + mapId + ' 不存在');
         need(x >= 0 && y >= 0 && x < m.width && y < m.height, `坐标 (${x}, ${y}) 在地图外面（地图 ${m.width}×${m.height}）`);
         need(!(m.events || []).some(e => e && e.x === x && e.y === y), `(${x}, ${y}) 已经有事件了`);
-        let id = m.events.findIndex((e, i) => i > 0 && !e);
-        if (id < 0) id = Math.max(1, m.events.length);
+        const id = freeEventId(m);
         const name = String(b.name || '').trim().slice(0, 40) || 'EV' + String(id).padStart(3, '0');
         const page = blankPage();
         if (b.image) page.image = checkImage(b.image, page.image);
@@ -330,6 +331,10 @@ module.exports = function (ctx) {
             END(),
           ];
           page.list = [{ code: 205, indent: 0, parameters: [0, { list, repeat: false, skippable: true, wait: true }] }, END()];
+        }
+        if (b.npcText !== undefined) {
+          need(page.image.characterName, '请选择 NPC 的行走图');
+          page.list = interactionList(T, b.npcText, page.list.slice(0, -1));
         }
         m.events[id] = { id, name, note: '', pages: [page], x, y };
         return id;

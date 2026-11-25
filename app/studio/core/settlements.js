@@ -20,7 +20,7 @@ function settlementBody(event) {
   const end = event?.list?.at(-1);
   if (!isSettlement(event) || event.trigger || end?.code !== 0 || end.indent !== 0) return null;
   const body = event.list.slice(1, -1);
-  return body.every(c => [0, 111, 121, 122, 126, 411, 412].includes(c?.code)) ? body : null;
+  return body.every(c => [0, 111, 121, 122, 125, 126, 127, 128, 129, 314, 315, 318, 411, 412].includes(c?.code)) ? body : null;
 }
 
 module.exports = { isSettlement, settlementId, settlementRef, settlementMark, settlementBody };

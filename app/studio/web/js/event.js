@@ -103,7 +103,6 @@ async function pageAction(path, body, next, msg) {
     if (location.hash === h) render(); else location.hash = h;
   } catch (e) { toast(e.message, true); }
 }
-function go(h) { if (location.hash === h) render(); else location.hash = h; }
 
 // 一页的内容：阅读 / 改台词
 function pageBody(box, pg, at) {
@@ -311,7 +310,6 @@ function editBox(box, pg, at) {
   }
   const P = S.project;
   const inScene = !!pg.isScene;   // 场景（公共事件带场景标记）：能 #扮演、#传送 选人，播完自动换回主角
-  const clearHint = P.pictures.clearAll === 'script' ? `关闭全部剧情图片（${P.pictures.min}~${P.pictures.max} 号）` : '关闭这一页里还在显示的图';
   box.innerHTML = `
     <div class="edtop">
       <div class="edmode"><div class="seg" role="tablist" aria-label="编辑方式">
@@ -322,18 +320,20 @@ function editBox(box, pg, at) {
           <button class="small" id="insSay" title="一句台词（选说话的人）">台词</button>
           <button class="small" id="insChoice" title="一组选项，每个选项下面写各自的内容">选项</button>
           <button class="small" id="insIf" title="条件分支：如果 … 否则 …">如果</button>
-          <button class="small" id="insTp" title="传送：在地图上点要去的格子">传送</button>
-          <button class="small" id="insScene" title="在这里播另一个场景 / 公共事件">场景</button>
-          <button class="small" id="insSettlement" title="执行一组物品、变量和开关指令">结算</button>
-          <button class="small" id="insVar">变量</button>
-          <button class="small" id="insSwitch">开关</button>
-          <button class="small" id="insItem">物品</button>
-          <button class="small" id="insPic">图片</button>
-          <button class="small" id="insWeather" title="在剧情执行到这里时切换天气">天气</button>
-          ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">扮演</button>' : ''}
-          <button class="small" id="insFloat" title="字从人物头上飘起来">飘字</button>
-          <button class="small" id="insAct" title="人物走几步、转身、冒气泡（移动路线）">动作</button>
-          <button class="small" id="insBalloon" title="人物头上冒气泡：！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz">气泡</button>
+          ${writingToolGroup('事件', `<button class="small" id="insTp" title="传送：在地图上点要去的格子">传送</button>
+            <button class="small" id="insScene" title="在这里播另一个场景 / 公共事件">场景</button>
+            <button class="small" id="insQuest">任务</button><button class="small" id="insShop">商店</button>`)}
+          ${writingToolGroup('数值', `<button class="small" id="insVar">变量</button>
+            <button class="small" id="insSwitch">开关</button>
+            <button class="small" id="insItem">物品</button>
+            <button class="small" id="insSettlement" title="执行一组物品、变量和开关指令">结算</button>
+            <button class="small" id="collectSettlement" type="button">选中多行收成结算组</button>`)}
+          ${writingToolGroup('演出', `<button class="small" id="insPic">图片</button>
+            <button class="small" id="insWeather" title="在剧情执行到这里时切换天气">天气</button>
+            ${inScene ? '<button class="small" id="insAs" title="场景里主角的小人换成别人，场景播完自动换回">扮演</button>' : ''}
+            <button class="small" id="insFloat" title="字从人物头上飘起来">飘字</button>
+            <button class="small" id="insAct" title="人物走几步、转身、冒气泡（移动路线）">移动</button>
+            <button class="small" id="insBalloon" title="人物头上冒气泡：！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz">气泡</button>`)}
           <button class="small quiet" id="blkUndo" title="撤销（Ctrl+Z）">撤销</button>
         </div>
       </div>
@@ -349,47 +349,9 @@ function editBox(box, pg, at) {
       <span class="sp"></span><span class="dim" style="font-size:12.5px">Ctrl+S 保存</span>
     </div>
     <div id="edMsg"></div>
-    <details class="helpbox"><summary>写法</summary><table>
-      <tr><td>名字：台词</td><td>一个对话框；不写名字就是旁白${P.nameBox ? '' : '（MV 没有名字框，「名字：」会原样留在台词里）'}</td></tr>
-      <tr><td>＋第二行</td><td>接在上一句的同一个对话框里</td></tr>
-      <tr><td>：台词</td><td>明确是旁白（台词本身带冒号时用）</td></tr>
-      <tr><td>#图 图片名</td><td>显示图片，叠在最上面（新图用 ${P.pictures.min}~${P.pictures.max} 号）</td></tr>
-      <tr><td>#清图</td><td>${clearHint}；#清图 图片2 = 关掉第 2 个 #图；#清图 图片名 = 按名字关</td></tr>
-      <tr><td>#等待 1.5</td><td>停 1.5 秒</td></tr>
-      <tr><td>#开关 名字 开</td><td>也可以写编号；关 = 关闭</td></tr>
-      <tr><td>#变量 名字 + 1</td><td>支持 = + - * / %</td></tr>
-      <tr><td>#物品 名字 +1</td><td>获得 / 失去物品</td></tr>
-      <tr><td>#如果 变量 DayCount = 3</td><td>条件分支：下面这些行只有在条件成立时才执行，<span class="t-code">#否则</span> 写不成立时的那段，<span class="t-code">#结束</span> 收尾。能写 <span class="t-code">变量 名字 = / &gt;= / &lt;= / &gt; / &lt; / != 数字</span>，也能写 <span class="t-code">开关 名字 开</span> / <span class="t-code">关</span>。两个以上条件用 <span class="t-code">并且</span> / <span class="t-code">或者</span> 连起来（例：<span class="t-code">变量 DayCount &gt;= 3 并且 开关 夜间 开</span>）</td></tr>
-      <tr><td>#传送 地图名 x y</td><td>${inScene
-        ? '场景里的传送：<span class="t-code">#传送 圣佳 医务室 10 5 前进3</span> = 换成圣佳来演、传送过去、到了往前走 3 格（谁、朝向「朝上」、到了以后的步骤都可以不写）。场景播完主角自动回到进场景前的地方、换回原来的样子'
-        : '主角传送到某张地图；后面可以写「朝上」和到了以后的步骤（<span class="t-code">#传送 一楼 10 5 朝上 前进3</span>）。场景外的传送就是主角自己，换人演要写在场景里'}</td></tr>
-      ${inScene ? '<tr><td>#扮演 圣佳</td><td>场景里主角的小人换成圣佳（数据库里的角色）；不是角色的人写行走图：<span class="t-code">#扮演 路人 People1 3</span>；<span class="t-code">#扮演 主角</span> = 换回来。场景播完自动换回</td></tr>' : ''}
-      <tr><td>#选项 去 | 不去</td><td>下面用「#1 …」「#2 …」写各自的内容</td></tr>
-      <tr><td>#字幕 大一 · 九月</td><td>画面中间一条暗底的字（章节、时间、地点）；几行用 ｜ 隔开</td></tr>
-      <tr><td>#立绘 林屿 笑 左</td><td>显示立绘 img/pictures/立绘/林屿_笑，底边贴着画面下沿；位置 左 / 中 / 右 可以不写（先左后右）；同一个人再写一次 = 换表情</td></tr>
-      <tr><td>#退场 林屿</td><td>收起这个人的立绘；只写 #退场 = 收起所有立绘</td></tr>
-      <tr><td>#淡出 / #淡入</td><td>画面变黑 / 恢复</td></tr>
-      <tr><td>#音乐 名字 80</td><td>放背景音乐（音量可以不写）；#停音乐 2 = 两秒内渐渐停掉；#环境音 / #停环境音 同理；#音效 名字</td></tr>
-      <tr><td>#色调 夜晚 2</td><td>正常 / 夜晚 / 深夜 / 黄昏 / 回忆 / 灰暗 / 红，2 秒变过去（不写 = 1 秒）</td></tr>
-      <tr><td>#场景 名字</td><td>在这里播另一个场景（公共事件），播完接着往下</td></tr>
-      <tr><td>#结算 交付任务奖励</td><td>执行同名结算组里的物品、变量、开关和条件分支</td></tr>
-      <tr><td>#插件 插件名 指令名（参数…）</td><td>直接写插件指令（RPG Maker 的「插件指令」），参数按插件里的顺序用「，」隔开，没写的用插件里写的默认值。可以照着上面已经有的 #插件 行改。例：<span class="t-code">#插件 VisuMZ_2_VNPictureBusts Basic_ExitBusts（["50"]，-200）</span></td></tr>
-      <tr><td>#行走图 角色 图名 编号</td><td>换角色的样子（比如现实里一套、游戏里一套）</td></tr>
-      <tr><td>#透明 开 / 关</td><td>主角隐身 / 现身</td></tr>
-      <tr><td>#消失 / #独立开关 A 开</td><td>这个事件先不见（打倒的怪）/ 这个事件自己的开关（只播一次）</td></tr>
-      <tr><td>#回到标题</td><td>结局放完回到标题画面</td></tr>
-      <tr><td>#震动 / #气泡 ！</td><td>画面震一下（可写强度 1~9）；主角头上冒气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz（后面写「本事件」= 这个事件头上）</td></tr>
-      <tr><td>#飘字 林屿：真的是我的问题吗</td><td>字从这个人头上飘起来再淡掉，不挡剧情（连着写几句，前面的会被顶上去，像念头一个一个冒出来）；不写名字 = 主角；「画面：」= 画面中间随便一处。名字可以是主角、本事件、地图上事件的名字</td></tr>
-      <tr><td>#动作 赵磊 转身 ！ 下2 等0.5</td><td>让人物动：上 下 左 右（上3）、前进 后退（前进3）、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、气泡 ！ ？ …；最后写「不等」= 不等他做完（两个人一起动）。走不过去的那步会跳过。<br>移动路线就是写这个：<span class="t-code">#动作 本事件 下3 左2</span> = 这个事件往下走三格、再往左走两格（走完才往下；加「不等」就不等）</td></tr>
-      <tr><td>#镜头 上 4 / #天气 雨 5 2秒 / #闪光</td><td>镜头往上平移 4 格（可写速度 1~6）；天气可选雨、暴雨、雪或无，末尾加「等完」会等待过渡；画面闪一下（白 / 红）</td></tr>
-      <tr><td>■ 选项（N 个）：…</td><td>列出这里有哪些选项，一眼看全；只是看的，不用改，改字在下面的「■ 选了」行</td></tr>
-      <tr><td>■ 选了「…」</td><td>选项：改「」里的字 = 改这个选项；照着写一行 = 加一个选项（放在「■ 选项结束」或「■ 按取消时」前面，最多 6 个），下面写它的台词；删掉这一行和它下面的内容 = 删掉这个选项</td></tr>
-      <tr><td>选项条件</td><td>有的选项要满足条件才能选：在阅读视图里点「选了 …」旁边的「＋条件」，选「满足才能选（不然是灰的）」或「满足才显示」。存进选项文字里的是插件写法 <span class="t-code">&lt;&lt;[条件]&gt;&gt;</span>（条件成立时灰掉）/ <span class="t-code">(([条件]))</span>（条件成立时不显示），也可以直接在「■ 选了」行里改；游戏里没装 WD_ConditionalChoice 也能用（编辑器自带的演出插件会接手）</td></tr>
-      <tr><td>■ …</td><td>其它原来的结构（条件、音效、脚本、选项的开头和结尾…），不能改、删、挪；在它们中间可以加台词</td></tr>
-      <tr><td>■ 插件：…</td><td>插件指令。插件里写了参数表的会显示成上面那种 <span class="t-code">#插件</span> 行，可以改、可以挪；没写参数表的只能看（要动就去 RPG Maker 里改）</td></tr>
-      <tr><td>#原样 …</td><td>编辑框表达不了的指令，可以删、可以挪，不能改内容</td></tr>
-      <tr><td><span class="t-code">\\LastGainObj</span>、<span class="t-code">&lt;center&gt;</span> …</td><td>灰色的是游戏里的文字代码（插件的也算）：游戏里会换成名字、颜色、刚得到的东西，或者居中显示。照原样留着就行；阅读视图和预览里显示的是换好的样子</td></tr>
-    </table></details>`;
+    ${writingHelp({ scene: inScene })}`;
+  bindWritingHelp(box);
+  bindMenu(box);
   const ta = $('textarea', box), pre = $('pre', box);
   let orig = sc.text;
   ta.value = orig;
@@ -523,14 +485,28 @@ function editBox(box, pg, at) {
   $('#insVar', box).onclick = async () => { const n = await pickNameOrCreate('插入变量', 'var'); if (n) insert('#变量 ' + n + ' + 1'); };
   $('#insSwitch', box).onclick = async () => { const n = await pickNameOrCreate('插入开关', 'switch'); if (n) insert('#开关 ' + n + ' 开'); };
   $('#insSettlement', box).onclick = async () => { const n = await settlementPicker(); if (n) insert('#结算 ' + n); };
+  $('#collectSettlement', box).onclick = () => {
+    if (mode === 'blocks') {
+      setMode('text');
+      ta.focus({ preventScroll: true });
+      toast('选中要合并的几行，再点「数值 → 选中多行收成结算组」');
+      return;
+    }
+    collectSettlementSelection(ta).catch(error => toast(error.message, true));
+  };
+  $('#insQuest', box).onclick = async () => {
+    try { const line = await questCommandDialog(); if (line) insert(line); }
+    catch (error) { toast(error.message, true); }
+  };
   $('#insScene', box).onclick = async () => {
     const n = await scenePicker();
     if (n) insert('#场景 ' + n);
   };
+  $('#insShop', box).onclick = async () => { const block = await shopWritingBlock(); if (block) insert(block); };
   $('#insTp', box).onclick = async () => { const t = await transferDialog(at && at.type === 'map' ? at.map : 0, { scene: inScene }); if (t) insert(transferLine(t)); };
   if (inScene) $('#insAs', box).onclick = async () => { const l = await asDialog(); if (l) insert(l); };
   $('#insFloat', box).onclick = async () => { const who = await whoDialog('飘字：字从谁头上冒出来', ['画面']); if (who) insert('#飘字 ' + who + '：'); };
-  $('#insAct', box).onclick = async () => { const who = await whoDialog('动作 / 移动路线：谁动'); if (who) insert('#动作 ' + who + ' '); };
+  $('#insAct', box).onclick = async () => { const who = await whoDialog('移动路线：谁动'); if (who) insert('#移动 ' + who + ' '); };
   $('#insBalloon', box).onclick = async () => { const l = await balloonLine('本事件'); if (l) insert(l); };
   setMode(mode);
 }

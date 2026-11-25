@@ -486,9 +486,11 @@ async function placeDollNpc(saved, defaultMap) {
     '<label for="dollNpcMap">地图</label><select id="dollNpcMap">' + maps.map(m => '<option value="' + m.id + '"' + (m.id === defaultMap ? ' selected' : '') + '>' + esc(m.name || '地图 ' + m.id) + '</option>').join('') +
     '</select><label for="dollNpcMove">移动方式</label><select id="dollNpcMove"><option value="0">站立</option><option value="1">随机走动</option></select></div>' +
     '<label><input type="checkbox" id="dollNpcAttack"> 按互动键时播放挥砍动作</label>' +
+    npcInteractionFields() +
     '<div id="dollNpcMapBox"></div><div id="dollNpcPoint" class="dim">在地图上选一格</div><div role="alert" id="dollNpcError"></div></div>' +
     '<footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok disabled>放置 NPC</button></footer>', (d, done) => {
     const map = $('#dollNpcMap', d), holder = $('#dollNpcMapBox', d), ok = $('[data-ok]', d), cancel = $('[data-x]', d), generation = d._gen;
+    const interaction = bindNpcInteraction(d);
     let point = null, box = null, submitting = false;
     const active = () => d.open && d._gen === generation;
     d.classList.add('dlg-wide');
@@ -518,6 +520,7 @@ async function placeDollNpc(saved, defaultMap) {
       try {
         const r = await api('event/create', {
           ...point, name: $('#dollNpcName', d).value, moveType: Number($('#dollNpcMove', d).value),
+          npcText: interaction.value,
           attackName: $('#dollNpcAttack', d).checked ? saved.attack : '',
           image: { characterName: saved.walk, characterIndex: 0, direction: 2, pattern: 1 },
         });

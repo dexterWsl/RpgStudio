@@ -22,13 +22,14 @@ const { createRegistry } = require('./core/projects.js');
 const { createSettings } = require('./core/settings.js');
 const { createTools } = require('./core/tools.js');
 const { createPlaytest } = require('./core/playtest.js');
+const { questOf } = require('./core/quests.js');
 const Profiles = require('./profiles/index.js');
 const { createAt } = require('./lib/at.js');
 const { json, readBody, saveUpload, createHostGuard, createStatic } = require('./lib/http.js');
 const { UserError } = require('./lib/util.js');
 
 const WEB = path.join(__dirname, 'web');
-const MODULES = ['core', 'events', 'maps', 'placing', 'tilesets', 'system', 'names', 'people', 'images', 'gallery', 'projects', 'assets', 'progress', 'scenes', 'settlements'].map(n => require('./routes/' + n + '.js'));
+const MODULES = ['core', 'events', 'maps', 'placing', 'tilesets', 'system', 'names', 'people', 'images', 'gallery', 'projects', 'assets', 'progress', 'scenes', 'settlements', 'inventory', 'map-templates', 'quests', 'world-time', 'relationships', 'enemies', 'map-enemies', 'plugins', 'layered-portrait'].map(n => require('./routes/' + n + '.js'));
 const DEFAULT_MAX_UPLOAD = 4 * 1024 ** 3;   // 上传游戏 / 素材包的上限（opts.projects.maxUpload 可以改）
 const val = v => (typeof v === 'function' ? v() : v);
 
@@ -59,7 +60,7 @@ function createStudio(opts) {
   const settings = S.get, saveSettings = S.save;
   const profile = () => Profiles.pick(project, settings().profile || (isBuiltin() ? opts.profile : ''));
   const picOptions = () => ({ ...profile().pictures, ...(settings().pictures || {}) });
-  const tools = () => createTools({ project, profile, picOptions, settings, backupsDir, onWrite, where });
+  const tools = () => createTools({ project, profile, picOptions, settings, backupsDir, onWrite, where, workDataDir });
 
   // ---------- 位置 → 文字 ----------
   function where(at) {
@@ -72,6 +73,8 @@ function createStudio(opts) {
     if (at.type === 'ce') return project.label('ce', at.ce);
     if (at.type === 'troop') return project.label('troop', at.troop) + ` · 第 ${at.page + 1} 页`;
     if (at.type === 'actor') return project.label('actor', at.actor);
+    if (at.type === 'quest') return '任务 · ' + (questOf(project.sys(), String(at.quest))?.name || at.quest);
+    if (at.type === 'world-time') return '人物 · 世界时间';
     if (at.type === 'system') return '游戏设置';
     if (at.type === 'var-rule') return at.rule === 'group' ? '变量组 · ' + project.label('switch', at.id) : '自动累计 · ' + project.label('var', at.id);
     return '';
@@ -98,7 +101,7 @@ function createStudio(opts) {
     const dir = project.dataDir();
     return path.relative(defaultDataDir(project.gameDir()), dir) ? dir : '';
   };
-  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId, workDataDir, system: project.sys });
+  const playtest = createPlaytest({ root: () => project.gameRoot(), id: playId, workDataDir, system: project.sys, uploadRoot });
 
   // ---------- 各功能模块 ----------
   const ctx = {

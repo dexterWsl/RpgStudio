@@ -1,0 +1,161 @@
+.catalog-row {
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr) auto;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  padding: 10px 14px;
+}
+.catalog-row:last-child { border-bottom: 0; }
+.equip-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.equip-stats label { display: grid; gap: 4px; }
+.equip-stats input { min-width: 0; width: 100%; }
+.icon-chooser { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; }
+.icon-chooser button { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 3px; image-rendering: pixelated; }
+.icon-chooser button:hover, .icon-chooser button:focus-visible { outline: 2px solid var(--accent, #65bdf4); }
+.quest-detail { margin-top: 14px; padding: 14px; }
+.quest-desc { white-space: pre-wrap; }
+.quest-lines { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.quest-lines code { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.quest-steps { display: grid; gap: 8px; padding-left: 2em; margin: 0; }
+.quest-steps input { flex: 1; min-width: 0; }
+.npc-schedule { display: grid; gap: 12px; }
+.schedule-slot { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.schedule-slot > button { justify-self: end; }
+dialog [data-error]:empty { display: none; }
+dialog [data-error] { color: var(--bad, #f48e8e); white-space: pre-wrap; }
+.writing-tools > summary { width: auto; height: auto; gap: 4px; padding: 3px 9px; font-size: 13px; line-height: 1.5; background: var(--panel); border-color: var(--line); }
+.writing-tools .mlist { right: auto; left: 0; white-space: nowrap; }
+.writing-help .filters { margin: 10px 0 4px; }
+.writing-help .filters input { min-width: 0; }
+.writing-help td { overflow-wrap: anywhere; }
+.writing-help code { white-space: pre-wrap; }
+.writing-help tr[hidden] { display: none; }
+.template-mode-note { margin-top: 5px; }
+.template-open-image { display: contents; }
+.template-open-image[hidden] { display: none; }
+.relationship-panel { margin-top: 18px; }
+.relationship-panel > summary { padding: 11px 14px; cursor: pointer; font-weight: 650; }
+.relationship-panel > div { padding: 0 14px 14px; }
+.edit-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.edit-section { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 6px; }
+.edit-section h3 { margin: 0; }
+.edit-list { display: grid; gap: 6px; }
+.edit-line { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 6px; }
+.edit-line.edit-line-three { grid-template-columns: minmax(0, 1fr) minmax(95px, 0.7fr) auto; }
+.edit-line :is(input, select) { min-width: 0; width: 100%; }
+.edit-line label { display: grid; gap: 3px; }
+.relationship-panel [data-error] { color: var(--bad, #f48e8e); }
+[data-affinity-hint] a { margin-left: 8px; }
+.edit-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.edit-toggle input[type=number] { width: 6em; }
+.edit-more { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.edit-more > summary { cursor: pointer; }
+.edit-more[open] > summary { margin-bottom: 8px; }
+.newpop .row:last-child { flex-wrap: wrap; }
+.encounter-row .folder-input select { flex: 1; min-width: 0; }
+.encounter-row .edit-more { margin: 5px 0 4px; }
+.edit-graphic { display: grid; gap: 8px; }
+.edit-graphic img { max-width: 100%; max-height: 120px; object-fit: contain; justify-self: start; }
+.plugin-tabs { display: flex; gap: 8px; margin: 0 0 14px; }
+.plugin-market-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 10px; }
+.plugin-card, .plugin-config { padding: 14px; }
+.plugin-card h2 { margin: 0 0 6px; }
+.plugin-description { display: block; overflow-wrap: anywhere; }
+.plugin-command { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.plugin-command:last-child { border-bottom: 0; }
+.plugin-command summary { cursor: pointer; }
+.plugin-command summary > * { margin-right: 8px; }
+.plugin-command-body { padding: 4px 0 8px 10px; overflow-wrap: anywhere; }
+.plugin-args { width: 100%; text-align: left; border-collapse: collapse; }
+.plugin-args td, .plugin-args th { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.plugin-config [data-error] { color: var(--bad); }
+.portrait-screen {
+  position: relative;
+  width: min(100%, 380px);
+  overflow: hidden;
+  border-radius: 6px;
+  outline: 1px solid var(--line);
+  background-color: var(--panel);
+  background-image: linear-gradient(90deg, var(--line) 1px, transparent 1px), linear-gradient(var(--line) 1px, transparent 1px);
+  background-size: 10% 10%;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.portrait-selection {
+  position: absolute;
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 100vmax rgb(0 0 0 / 48%);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  cursor: move;
+}
+.portrait-resize {
+  position: absolute;
+  inset: auto 0 0 auto;
+  width: 13px;
+  height: 13px;
+  background: var(--accent);
+  border-radius: 3px 0 0 0;
+  cursor: nwse-resize;
+}
+.portrait-frame-preview { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; pointer-events: none; }
+.portrait-coordinates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  width: min(100%, 380px);
+  gap: 8px;
+  margin-top: 10px;
+}
+.portrait-coordinates label { display: grid; gap: 4px; }
+.portrait-coordinates input { width: 100%; min-width: 0; }
+.portrait-fade { max-width: 260px; }
+.portrait-commands { display: flex; flex-wrap: wrap; gap: 8px 16px; overflow-wrap: anywhere; }
+.layered-workspace { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(260px, 1fr); gap: 18px; align-items: start; }
+.layered-stage { position: sticky; top: 0; background: var(--panel); }
+.layered-stage canvas {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: min(55vh, 540px);
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background-color: var(--panel);
+  background-image: conic-gradient(#8883 25%, transparent 0 50%, #8883 0 75%, transparent 0);
+  background-size: 24px 24px;
+}
+.layered-stage canvas.align { cursor: move; touch-action: none; }
+.layered-stage code { white-space: pre-line; overflow-wrap: anywhere; }
+.layered-workspace textarea { display: block; width: 100%; margin: 6px 0; }
+.portrait-import { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; }
+.portrait-import input { max-width: 100%; }
+.portrait-extract { width: min(790px, 89vw); }
+.portrait-extract-search { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.portrait-extract-search label { display: grid; gap: 4px; }
+.portrait-extract-search :is(input, select) { min-width: 0; width: 100%; }
+.portrait-extract-grid { display: grid; grid-template-columns: minmax(180px, .9fr) minmax(240px, 1.1fr); gap: 14px; }
+.portrait-extract [data-parts-preview] {
+  position: relative;
+  min-height: 24px;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: conic-gradient(#8883 25%, transparent 0 50%, #8883 0 75%, transparent 0) 0 0 / 24px 24px;
+}
+.portrait-extract [data-parts-preview] img { position: absolute; max-width: none; }
+.portrait-extract-part { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.portrait-extract-part img { width: 42px; height: 42px; object-fit: contain; }
+.portrait-extract-part b, .portrait-extract-part small { display: block; overflow-wrap: anywhere; }
+.portrait-extract-part select { max-width: 120px; }
+.layered-workspace h2 { font-size: 16px; margin: 0; }
+.pl-pics canvas { position: absolute; max-width: none; }
+@media (max-width: 650px) {
+  .edit-line { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layered-workspace { grid-template-columns: minmax(0, 1fr); }
+  .layered-stage { position: static; }
+  .portrait-extract-grid, .portrait-extract-search { grid-template-columns: minmax(0, 1fr); }
+}

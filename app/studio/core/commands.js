@@ -33,15 +33,34 @@ const CONT_OF = { 401: 101, 405: 105, 408: 108, 655: 355, 657: 357, 505: 205, 60
 
 const { createTextCodes } = require('./textcodes.js');
 const choicecond = require('./choicecond.js');
+const { immunitySteps } = require('./encounter-commands.js');
+const { readShop } = require('./shop.js');
 const stage = require('./stage.js');
 const { isSettlement } = require('./settlements.js');
+const { questsOf, QUEST_STATES, readQuestInstruction } = require('./quests.js');
+const layered = require('./layered-portrait.js');
+const layeredCues = require('./layered-cues.js');
 
 function createDescriber(project, opts = {}) {
   const codes = createTextCodes(project);
   const P = project;
+  const quests = questsOf(P.read('System.json'));
+  const questByVariable = new Map(quests.map(q => [q.variable, q]));
   const isClearAll = opts.isClearAll || (() => false);
   const short = (s, n = 60) => { s = String(s == null ? '' : s).replace(/\s+/g, ' '); return s.length > n ? s.slice(0, n) + '…' : s; };
   const L = (kind, id) => P.label(kind, id);
+  function questCondition(p, display) {
+    if (p[0] !== 1 || p[2] !== 0) return '';
+    const quest = questByVariable.get(p[1]);
+    if (!quest) return '';
+    let status = '';
+    if (p[4] === 1 && p[3] === QUEST_STATES.已接取) status = '已接取';
+    if (p[4] === 0) {
+      status = Object.keys(QUEST_STATES).find(key => key !== '已接取' && QUEST_STATES[key] === p[3]) || '';
+      if (!status && Number.isInteger(p[3]) && p[3] >= 1 && p[3] <= quest.steps.length) status = `第 ${p[3]} 步`;
+    }
+    return status ? `任务 ${display ? '「' + quest.name + '」' : quest.id} ${status}` : '';
+  }
   const range = (kind, a, b) => (Number(b) && Number(b) !== Number(a) ? `${P.KIND_LABEL[kind]} ${a}~${b}` : L(kind, a));
   const chr = id => (Number(id) === -1 ? '玩家' : Number(id) === 0 ? '本事件' : `事件 ${id}`);
   const audio = (a, what) => (a && a.name ? `${what}「${a.name}」` : `停止${what}`);
@@ -62,7 +81,7 @@ function createDescriber(project, opts = {}) {
     p = p || [];
     switch (p[0]) {
       case 0: return `${L('switch', p[1])} 为${p[2] === 0 ? '开' : '关'}`;
-      case 1: return `${L('var', p[1])} ${CMP[p[4]] || '?'} ${p[2] === 0 ? p[3] : L('var', p[3])}`;
+      case 1: return questCondition(p, true) || `${L('var', p[1])} ${CMP[p[4]] || '?'} ${p[2] === 0 ? p[3] : L('var', p[3])}`;
       case 2: return `独立开关 ${p[1]} 为${p[2] === 0 ? '开' : '关'}`;
       case 3: return `计时器 ${p[1] === 0 ? '≥' : '≤'} ${Math.floor(p[2] / 60)}分${p[2] % 60}秒`;
       case 4: {
@@ -130,13 +149,18 @@ function createDescriber(project, opts = {}) {
   function condSrc(p) {
     p = p || [];
     if (p[0] === 0) return `开关 ${p[1]} ${p[2] === 0 ? '开' : '关'}`;
-    if (p[0] === 1 && p[2] === 0) return `变量 ${p[1]} ${CMP_SRC[p[4]] || '='} ${p[3]}`;
+    if (p[0] === 1 && p[2] === 0) return questCondition(p, false) || `变量 ${p[1]} ${CMP_SRC[p[4]] || '='} ${p[3]}`;
     if (p[0] === 12) { const g = parseCondScript(p[1]); return g ? condGroupsText(g, false) : ''; }
     return '';
   }
 
   function describe(c) {
     const p = c.parameters || [];
+    const task = readQuestInstruction(c);
+    if (task) {
+      const name = quests.find(q => q.id === task.id)?.name || String(task.id);
+      return `${task.action}任务「${name}」${task.step ? ' · 第 ' + task.step + ' 步' : ''}`;
+    }
     if (isClearAll(c)) return '关闭全部剧情图片';
     switch (c.code) {
       case 0: return '结束';
@@ -200,7 +224,10 @@ function createDescriber(project, opts = {}) {
       case 224: return '画面闪烁';
       case 225: return '画面震动';
       case 230: return `等待 ${Math.round((Number(p[0]) / 60) * 100) / 100} 秒`;
-      case 231: return `显示图片 #${p[0]}「${p[1]}」`;
+      case 231: {
+        const portrait = layered.readPicture(p[1]);
+        return portrait ? `分层立绘「${portrait.who} · ${portrait.face}」${portrait.action === 'still' ? '' : ' · ' + (layered.actions[portrait.action] || portrait.action)}` : `显示图片 #${p[0]}「${p[1]}」`;
+      }
       case 232: return `移动图片 #${p[0]}`;
       case 233: return `旋转图片 #${p[0]}`;
       case 234: return `图片色调 #${p[0]}`;
@@ -251,7 +278,14 @@ function createDescriber(project, opts = {}) {
       case 352: return '打开存档画面';
       case 353: return '游戏结束';
       case 354: return '回到标题';
-      case 355: return '脚本：' + short(p[0]);
+      case 355: {
+        const cue = layeredCues.read(c);
+        if (cue) return layeredCues.textOf(cue);
+        const steps = immunitySteps(c);
+        const shop = readShop(c);
+        if (shop) return `商店（${shop.goods.length} 种商品）`;
+        return steps === null ? '脚本：' + short(p[0]) : '#免遇敌 ' + steps;
+      }
       case 655: return '　' + short(p[0]);
       case 356: return stageText(c) || '插件指令：' + short(p[0]);
       case 357: {
@@ -272,6 +306,7 @@ function createDescriber(project, opts = {}) {
     const a = pc.args, s = k => String(a[k] == null ? '' : a[k]);
     switch (pc.cmd) {
       case 'float': return `飘字（${s('who') || '主角'}）：${short(s('text'), 40)}`;
+      case 'speech': return `文字气泡（${s('who') || '本事件'}）：${short(s('text'), 40)}`;
       case 'act': return `动作：${s('who')} ${s('steps')}${s('wait') === 'false' ? '（不等）' : ''}`;
       case 'as': return ['主角', '玩家', ''].includes(s('who')) ? '换回主角的样子' : `扮演 ${s('who')}${s('sheet') ? `（行走图 ${s('sheet')} ${Number(a.index) || 0}）` : ''}：主角的小人换成${s('who')}，场景播完换回`;
       case 'transfer': return `传送${s('who') ? `（换成${s('who')}演）` : ''}到 ${L('map', Number(a.map))} (${Number(a.x)}, ${Number(a.y)})${DIRS[a.dir] && Number(a.dir) ? '，朝' + DIRS[a.dir] : ''}${s('steps') ? '，到了以后 ' + s('steps') : ''}`;
@@ -308,7 +343,11 @@ function createDescriber(project, opts = {}) {
       case 117: r.push({ kind: 'ce', id: p[0] }); break;
       case 126: r.push({ kind: 'item', id: p[0] }); break;
       case 201: if (p[0] === 0) r.push({ kind: 'map', id: p[1] }); break;
-      case 231: r.push({ kind: 'picture', id: String(p[1] || '') }); break;
+      case 231: {
+        const portrait = layered.readPicture(p[1]);
+        r.push(portrait ? { kind: 'actor', id: portrait.actor } : { kind: 'picture', id: String(p[1] || '') });
+        break;
+      }
       case 103: case 104: r.push({ kind: 'var', id: p[0] }); break;
     }
     return r;
@@ -372,7 +411,7 @@ function createDescriber(project, opts = {}) {
       const refs = refsOf(c);
       if (refs.length) row.refs = refs;
       if (c.code === 0) row.text = '';   // 分支内部的结束标记：只占缩进，不显示文字
-      if (c.code === 231) row.picture = p[1];
+      if (c.code === 231 && !layered.readPicture(p[1])) row.picture = p[1];
       rows.push(row);
     }
     // 去掉只占位的空结束标记

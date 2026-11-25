@@ -6,6 +6,8 @@ const { need, int, UserError } = require('../lib/util.js');
 const { changedValue, outcome } = require('../core/impact.js');
 const { isSettlement } = require('../core/settlements.js');
 const { OPERATORS, rulesOf, parsePassive, describePassive, changeRule } = require('../core/variable-rules.js');
+const { clockVariables } = require('../core/world-time.js');
+const { questsOf } = require('../core/quests.js');
 
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
@@ -96,6 +98,7 @@ module.exports = function (ctx) {
         const arr = system[kind === 'var' ? 'variables' : 'switches'];
         need(id < arr.length || b.id === 'new', '编号超出范围');
         while (arr.length <= id) arr.push('');
+        if (passive) need(!clockVariables(system).includes(id) && !questsOf(system).some(q => q.variable === id), '世界时间和任务的进度变量由游戏自动更新，请为自动累计选择其他变量');
         if (passive !== undefined) changeRule(ctx, system, 'passive', id, passive);
         if (name === undefined) name = String(arr[id] || '');
         arr[id] = name;

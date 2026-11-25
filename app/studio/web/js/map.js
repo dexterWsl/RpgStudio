@@ -80,6 +80,7 @@ async function viewMap(main, id, mode, opts = {}) {
       <span class="sp"></span>
       <button class="small" id="mapPlay" title="跳过标题，直接从这张地图开始（开始地图就站在开始位置，别的地图找一格能站的）">▶ 在这里试玩</button>
       <button class="small" id="mapWeather">天气</button>
+      <button class="small" id="mapEnemies">敌人设置</button>
       <button class="small" id="mapResize">调整尺寸</button>
       <button class="small" id="mapProps">地图属性</button>
       ${moreMenu([{ id: 'mapChild', label: '新建子地图' }, { id: 'mapCopy', label: '复制这张地图' }, { id: 'mapDel', label: '删除这张地图', danger: true }])}
@@ -118,6 +119,7 @@ async function viewMap(main, id, mode, opts = {}) {
   $('#lblToggle').onchange = e => { S.labels = e.target.checked; remember(); $('#board').classList.toggle('labels', S.labels); };
   $('#mapProps').onclick = () => mapPropsDialog();
   $('#mapWeather').onclick = () => mapWeatherDialog();
+  $('#mapEnemies').onclick = () => mapEnemiesDialog(id).catch(e => toast(e.message, true));
   $('#mapResize').onclick = () => mapResizeDialog();
   bindMenu(main);
   $('#mapChild').onclick = () => newMapDialog(id);
@@ -698,7 +700,7 @@ function newEventPopover(p) {
   pop.style.top = Math.max(0, p.y * ME.D - 8) + 'px';
   pop.innerHTML = `<div class="dim" style="font-size:12.5px">在 (${p.x}, ${p.y}) 新建事件</div>
     <div class="row"><input placeholder="事件名（可以不填）" maxlength="40"><button class="primary small">新建</button></div>
-    <button class="quiet small" style="align-self:flex-start">取消</button>`;
+    <div class="row"><button class="small" type="button" data-place-npc>放置 NPC</button><button class="small" type="button" data-interaction-template>交互模板</button><button class="small" type="button" data-place-enemy>放置敌人</button><button class="quiet small" type="button">取消</button></div>`;
   $('#stage').appendChild(pop);
   const inp = $('input', pop); inp.focus();
   const go = async () => {
@@ -711,6 +713,21 @@ function newEventPopover(p) {
   };
   $('button.primary', pop).onclick = go;
   $('button.quiet', pop).onclick = () => pop.remove();
+  $('[data-interaction-template]', pop).onclick = () => {
+    const map = ME.id;
+    pop.remove();
+    placeMapTemplate(map, p).catch(e => toast(e.message, true));
+  };
+  $('[data-place-enemy]', pop).onclick = () => {
+    const map = ME.id;
+    pop.remove();
+    placeMapEnemy(map, p).catch(e => toast(e.message, true));
+  };
+  $('[data-place-npc]', pop).onclick = () => {
+    const map = ME.id;
+    pop.remove();
+    placeNpc({ map, point: p }).catch(e => toast(e.message, true));
+  };
   inp.onkeydown = e => { if (e.key === 'Enter') go(); if (e.key === 'Escape') pop.remove(); };
   pop.onpointerdown = e => e.stopPropagation();
 }

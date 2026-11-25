@@ -5,6 +5,7 @@ function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   return { name: parts[0] || 'home', a: parts[1], b: parts[2], c: parts[3] };
 }
+function go(h) { if (location.hash === h) render(); else location.hash = h; }
 let lastHash = location.hash;
 window.addEventListener('hashchange', () => {
   if (S.dirty && !confirm('还有未保存的修改，确定离开？')) { history.replaceState(null, '', lastHash || '#/'); return; }
@@ -39,12 +40,15 @@ async function render(o = {}) {
     else if (r.name === 'names') await viewNames(main, r.a === 'var' ? 'var' : 'switch', r.b);
     else if (r.name === 'search') await viewSearch(main, r.a || '');
     else if (r.name === 'check') await viewCheck(main);
-    else if (r.name === 'people') await (r.a ? viewPerson(main, r.a) : viewPeople(main));
+    else if (r.name === 'people') await (r.a === 'enemies' ? viewEnemies(main) : r.b === 'portrait' ? viewLayeredPortrait(main, r.a) : r.a ? viewPerson(main, r.a) : viewPeople(main));
     else if (r.name === 'sprites') await viewSprites(main, r.a);
     else if (r.name === 'gallery') await viewGallery(main);
     else if (r.name === 'progress') await viewProgress(main, r.a);
     else if (r.name === 'scenes') await viewScenes(main);
     else if (r.name === 'settlements') await viewSettlements(main, r.a);
+    else if (r.name === 'inventory') await viewInventory(main, r.a);
+    else if (r.name === 'plugins') await viewPlugins(main, r.a, r.b);
+    else if (r.name === 'quests') await viewQuests(main, r.a);
     else if (r.name === 'projects') await viewProjects(main, r.a);
     else if (r.name === 'assets') await viewAssets(main);
     else if (r.name === 'tilesets') await viewTilesets(main, r.a);
@@ -176,7 +180,18 @@ async function showRefs(kind, id) {
     $('#sideX').onclick = closeSide;
   } catch (e) { if (S.side === selection) side.innerHTML = `<div class="side-in"><div class="err">${esc(e.message)}</div></div>`; }
 }
-const hrefOf = at => !at ? '#/' : at.type === 'map' ? (at.ev != null ? `#/event/${at.map}/${at.ev}/${at.page || 0}` : `#/map/${at.map}`) : at.type === 'ce' ? `#/ce/${at.ce}` : at.type === 'actor' ? `#/people/a${at.actor}` : at.type === 'system' ? '#/system' : at.type === 'var-rule' ? `#/names/var/${at.rule === 'group' ? 'group-' : ''}${at.id}` : '#/';
+function hrefOf(at) {
+  switch (at?.type) {
+    case 'map': return at.ev == null ? `#/map/${at.map}` : `#/event/${at.map}/${at.ev}/${at.page || 0}`;
+    case 'ce': return `#/ce/${at.ce}`;
+    case 'actor': return `#/people/a${at.actor}`;
+    case 'quest': return `#/quests/${at.quest}`;
+    case 'world-time': return '#/people';
+    case 'system': return '#/system';
+    case 'var-rule': return `#/names/var/${at.rule === 'group' ? 'group-' : ''}${at.id}`;
+    default: return '#/';
+  }
+}
 
 document.addEventListener('click', e => {
   const r = e.target.closest('.ref');

@@ -37,7 +37,7 @@ function playTimeline(tl, title) {
   fit();
   window.addEventListener('resize', fit);
   const pics = new Map(), tws = new Map();
-  let stack, said, waiting, ended;
+  let stack, said, waiting, ended, currentPortrait;
   const els = { msg: $('.pl-msg', d), face: $('.pl-face', d), name: $('.pl-name', d), text: $('.pl-text', d), ask: $('.pl-ask', d), note: $('.pl-note', d), fade: $('.pl-fade', d), count: $('.pl-count', d), layer: $('.pl-pics', d), twLayer: $('.pl-tws', d) };
   // 立绘插件：位置 0~10 → 坐标（左右各留 bufferX，底边对齐），哪些位置自动镜像
   const B = tl.bust || { ax: 0.5, ay: 1, sx: 100, sy: 100, inverted: [], bufferX: 200, stagger: 0, addY: 0 };
@@ -72,6 +72,13 @@ function playTimeline(tl, title) {
       el = document.createElement('div');
       el.className = 'pl-missing';
       el.textContent = (s.video ? '找不到视频：' : '找不到图片：') + s.name;
+    } else if (s.portrait) {
+      el = document.createElement('canvas');
+      el.width = s.portrait.layout.width;
+      el.height = s.portrait.layout.height;
+      el.setAttribute('aria-label', s.name);
+      el._portrait = s.portrait;
+      RpgStudioLayered.mount(el, () => el._portrait, file => img(RpgStudioLayered.partSub, file));
     } else if (s.video) {
       el = document.createElement('video');
       el.muted = true; el.autoplay = true; el.playsInline = true; el.loop = !!s.loop;
@@ -97,14 +104,22 @@ function playTimeline(tl, title) {
       st = { id: s.id, name: s.name, bust: true, pos, x: posX(pos), y: posY(pos), ax, ay, sx: B.sx, sy: B.sy, op: 255, mirrored: autoMirror(s.bust.mirror, pos) };
     } else {
       const o = s.origin === 1 ? 0.5 : 0;
-      st = { ...s, ax: o, ay: o };
+      st = { ...s, ax: o, ay: s.portrait && o ? 1 : o };
     }
     el.style.zIndex = s.id * 2 + (s.video ? 1 : 0);
     el._s = st;
     pics.set(k, el);
+    if (s.portrait) currentPortrait = el;
     els.layer.appendChild(el);
     if (s.from && s.dur) animate(el, { ...st, x: st.x + s.from.dx, y: st.y + s.from.dy, op: 0 }, st, s.dur);
     else animate(el, st, st, 0);
+  }
+  function cuePortrait(s) {
+    const el = currentPortrait;
+    if (!el?.isConnected || !el._portrait) return;
+    const portrait = el._portrait, selection = portrait.selection || { parts: {} };
+    RpgStudioLayered.selectCue(selection, s.cue, 0);
+    el._portrait = { ...portrait, selection, state: selection.state || '正常', action: selection.action || portrait.action };
   }
   // 立绘换图：位置、镜像都不变
   function swapPic(s) {
@@ -207,6 +222,7 @@ function playTimeline(tl, title) {
       const s = top.steps[top.i++];
       if (s.t === 'say') { say(s); return; }
       if (s.t === 'pic') showPic(s);
+      else if (s.t === 'layeredCue') cuePortrait(s);
       else if (s.t === 'swap') swapPic(s);
       else if (s.t === 'move') movePic(s);
       else if (s.t === 'erase') erasePic(s);
@@ -252,6 +268,8 @@ function storyboardHtml(steps, depth = 0) {
   const row = s => {
     if (s.t === 'say') return `<div class="sb-say">${s.speaker ? `<b>${esc(s.speaker)}</b>` : '<b class="faint">旁白</b>'}<span>${esc(s.lines.join('\n'))}</span></div>`;
     if (s.t === 'pic' && s.video) return s.missing ? `<div class="sb-pic bad"><span>找不到视频：${esc(s.name)}</span></div>` : `<div class="sb-ev">播放视频 ${esc(s.name)}</div>`;
+    if (s.t === 'pic' && s.portrait) return `<div class="sb-ev">显示分层立绘 ${esc(s.name)} · ${esc(RpgStudioLayered.actions[s.portrait.action] || s.portrait.action)}</div>`;
+    if (s.t === 'layeredCue') return `<div class="sb-ev">${esc(s.text)}</div>`;
     if (s.t === 'pic' || s.t === 'swap') {
       const what = s.t === 'swap' ? '换立绘' : s.bust ? '立绘入场' : '显示图片';
       return s.missing ? `<div class="sb-pic bad"><span>找不到图片：${esc(s.name)}</span></div>`

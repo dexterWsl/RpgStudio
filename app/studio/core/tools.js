@@ -24,7 +24,12 @@ const { createProgress } = require('./progress.js');
 const { createScenes } = require('./scenes.js');
 const { createPlayer } = require('./play.js');
 const { createPluginArgs } = require('./pluginargs.js');
+const layered = require('./layered-portrait.js');
+const layeredCues = require('./layered-cues.js');
 const stagePlugin = require('./stage.js');
+const mapEnemies = require('./map-enemies.js');
+const { isImmunityCommand } = require('./encounter-commands.js');
+const shop = require('./shop.js');
 
 // 编辑框里「■」结构行的文字（不能改的指令：选项开头、条件、循环、脚本、插件……）
 function anchorTextOf(describer) {
@@ -54,13 +59,17 @@ function anchorTextOf(describer) {
 }
 
 // 改过的文件里有没有用到演出插件的指令
-function listsOf(project, files) {
+function eventLists(files, read) {
   const lists = [];
   for (const f of files) {
-    const d = project.read(f);
-    if (/^Map\d+\.json$/.test(f) && d) for (const e of d.events || []) for (const pg of (e && e.pages) || []) lists.push(pg.list);
-    if (f === 'CommonEvents.json' && Array.isArray(d)) for (const ce of d) if (ce) lists.push(ce.list);
-    if (f === 'Troops.json' && Array.isArray(d)) for (const t of d) for (const pg of (t && t.pages) || []) lists.push(pg.list);
+    const d = read(f);
+    if (/^Map\d+\.json$/.test(f) && d) for (const e of d.events || []) for (const pg of (e && e.pages) || []) {
+      lists.push({ scope: f.slice(0, -5) + ':' + e.id, list: pg.list });
+    }
+    if (f === 'CommonEvents.json' && Array.isArray(d)) for (const ce of d) if (ce) lists.push({ scope: 'ce:' + ce.id, list: ce.list });
+    if (f === 'Troops.json' && Array.isArray(d)) for (const t of d) for (const pg of (t && t.pages) || []) {
+      lists.push({ scope: 'troop:' + t.id, list: pg.list });
+    }
   }
   return lists;
 }
@@ -87,8 +96,9 @@ function createTools(o) {
     parseScript: script.parseScript,
     scriptCommands: script.scriptCommands,
     stagingLine: script.stagingLine, stagingCommand: script.stagingCommand,
+    gameplayLine: script.gameplayLine,
     bustCommands: script.bustCommands, unbustCommands: script.unbustCommands,
-    picExists: n => !!project.findImage('pictures', n),
+    picExists: n => !!(layered.forPicture(project, n) || project.findImage('pictures', n)),
     exists: script.exists,
     defaultStyle: ['', 0, style.background, style.position],
   });
@@ -101,11 +111,28 @@ function createTools(o) {
   const validator = createValidator(project);
   const afterWrite = files => {
     try {
-      if (listsOf(project, files).some(stagePlugin.wants)) stagePlugin.ensure(project.gameRoot());
+      if (!o.workDataDir?.() && eventLists(files, project.read).some(({ list }) => stagePlugin.wants(list))) stagePlugin.ensure(project.gameRoot());
     } catch (e) { console.error('[studio] 演出插件：' + e.message); }
     if (o.onWrite) o.onWrite(files);
   };
-  const store = createStore(project, { backupsDir: o.backupsDir, onWrite: afterWrite });
+  const prepare = (files, docs, include) => {
+    const lists = eventLists(files, f => docs[f]);
+    if (lists.some(({ list }) => list?.some(c => layeredCues.read(c) || c.code === 231 && layered.readPicture(c.parameters[1])))) layered.ensure(o);
+    if (o.workDataDir?.() && lists.some(({ list }) => stagePlugin.wants(list))) include('System.json')[stagePlugin.KEY] = true;
+    if (lists.some(({ list }) => list?.some(isImmunityCommand))) {
+      mapEnemies.activate(o, include('System.json'));
+    }
+    const stores = lists.filter(({ list }) => list?.some(shop.readShop));
+    if (stores.length) {
+      const idsByScope = new Map();
+      for (const { list, scope } of stores) {
+        if (!idsByScope.has(scope)) idsByScope.set(scope, new Set());
+        shop.assignStockIds(list, scope, idsByScope.get(scope));
+      }
+      shop.activate(o, include('System.json'));
+    }
+  };
+  const store = createStore(project, { backupsDir: o.backupsDir, onWrite: afterWrite, prepare });
   const scenes = createScenes(project, xref, { where, progress });
   const player = createPlayer(project, describer);
   return { prof, pics, nameBox, describer, script, merger, xref, validator, store, people, gallery, progress, scenes, player };

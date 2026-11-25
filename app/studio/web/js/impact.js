@@ -105,6 +105,7 @@ function impactMessages(rule) {
     case 'branch': return ['走成立分支', rule.alternative ? '走「否则」分支' : '跳过成立分支'];
     case 'common': return [rule.trigger === 1 ? '允许公共事件自动执行' : '允许公共事件并行处理', '关闭此公共事件的触发条件'];
     case 'battle': return ['满足敌群事件页条件', '不再满足此敌群事件页条件'];
+    case 'shop': return ['商品可购买', '商品购买条件未满足'];
     case 'choiceLock': return ['锁定选项', '解除这项锁定条件'];
     case 'choiceHide': return ['隐藏选项', '解除这项隐藏条件'];
     case 'booleanGroup': return ['布尔结果变为 true（开）', '布尔结果变为 false（关）'];

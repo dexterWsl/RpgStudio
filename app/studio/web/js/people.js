@@ -68,13 +68,14 @@ async function viewPeople(main) {
         <small class="faint">${p.actorId ? '角色 ' + p.actorId + ' · ' : ''}${p.lines} 句台词 · ${p.pages} 页</small></span></a>`;
   main.innerHTML = `<div class="page wide">
     <div class="titlebar"><h1>人物</h1><span class="dim">数据库角色 ${actors.length} 个，另有 ${speakers.length} 个只在台词里出现的说话人</span><span class="sp"></span>
-      <a class="tag" href="#/sprites">小人库</a><button class="primary small" id="newActor">新增人物</button></div>
+      <a class="tag" href="#/sprites">小人库</a><a class="tag" href="#/people/enemies">敌人管理</a><button class="small" id="worldClock">世界时间</button><button class="primary small" id="newActor">新增人物</button></div>
     <div class="pgrid">${actors.map(card).join('') || '<div class="empty">还没有角色</div>'}</div>
     ${speakers.length ? `<div class="section"><h2>只在台词里出现的说话人</h2><span class="dim">对话框名字直接写的，不是数据库角色。想给 TA 配小人和头像，可以「新增人物」用同一个名字</span></div>
       <div class="pgrid">${speakers.map(card).join('')}</div>` : ''}
   </div>`;
   $$('.pspr[data-spr]', main).forEach(el => { if (el.dataset.spr) mountSprite(el, el.dataset.spr, Number(el.dataset.idx), 2, 44, false); });
   $('#newActor').onclick = () => actorDialog(null);
+  $('#worldClock').onclick = () => worldClockDialog().catch(e => toast(e.message, true));
 }
 
 // ---------- 一个人物 ----------
@@ -96,9 +97,11 @@ async function viewPerson(main, key) {
         <div class="titlebar" style="margin:0"><h1>${p.actorId ? `<span class="id num">角色 ${p.actorId}</span>` : ''}${esc(p.name)}</h1>${p.hint ? `<span class="hint">${esc(p.hint)}</span>` : ''}</div>
         <div class="meta" style="margin:4px 0 0">${a && a.nickname ? `<span>称号：${esc(a.nickname)}</span>` : ''}<span>${p.lines} 句台词</span><span>出现在 ${p.pages.length} 页</span></div>
         ${a && a.profile ? `<p class="dim" style="margin-top:6px;white-space:pre-wrap">${esc(a.profile)}</p>` : ''}
-        <div class="edbar">${p.actorId ? '<button class="small" id="editActor">改名字和资料</button><button class="small" id="pickSpr">换小人</button><button class="small" id="pickFace">换头像</button>' : `<span class="dim">TA 不是数据库角色（对话框里直接写的名字）。</span><button class="small primary" id="makeActor">建成数据库角色</button>`}</div>
+        <div class="edbar">${p.actorId ? '<button class="small" id="editActor">改名字和资料</button><button class="small" id="npcSchedule">人物日程</button><button class="small" id="personPlaceNpc">放到地图</button><button class="small" id="pickSpr">换小人</button><button class="small" id="pickFace">换头像</button>' : `<span class="dim">TA 不是数据库角色（对话框里直接写的名字）。</span><button class="small primary" id="makeActor">建成数据库角色</button>`}</div>
       </div>
     </div>
+    ${p.actorId ? `<details class="card relationship-panel"><summary>立绘</summary><div><a class="tag acc" href="#/people/${enc(p.key)}/portrait">分层制作</a></div></details>` : ''}
+    ${p.actorId ? '<details class="card relationship-panel" id="personRelationships"><summary>人物关系</summary><div data-relationships></div></details>' : ''}
     <div class="section"><h2>相关数值</h2><span class="dim">TA 说话、出场的那些事件页里用到的开关和变量，越是只和 TA 有关的排得越前</span></div>
     <div class="relcols">
       <div class="card relcard"><h3>变量</h3>${capped(p.related.vars.map(relRow), 8) || '<div class="faint" style="padding:8px 12px">没有</div>'}</div>
@@ -140,6 +143,9 @@ async function viewPerson(main, key) {
     $('#lkGo').onclick = async () => { try { await api('person/link', { actor: p.actorId, kind: $('#lkKind').value, id: Number($('#lkId').value), on: true }); toast('已关联'); render(); } catch (e) { toast(e.message, true); } };
   }
   if ($('#editActor')) $('#editActor').onclick = () => actorDialog(p);
+  if ($('#npcSchedule')) $('#npcSchedule').onclick = () => npcScheduleDialog(p.actorId, p.name).catch(e => toast(e.message, true));
+  if ($('#personPlaceNpc')) $('#personPlaceNpc').onclick = () => placeNpc({ actorId: p.actorId }).catch(e => toast(e.message, true));
+  if (p.actorId) mountRelationships($('#personRelationships', main), p.actorId, p.name);
   if ($('#pickSpr')) $('#pickSpr').onclick = async () => {
     const r = await spritePicker({ name: a.characterName, index: a.characterIndex, dir: 2, pattern: 1 }, { title: `${p.name} 的小人`, noDir: true });
     if (!r) return;

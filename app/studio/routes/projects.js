@@ -15,6 +15,14 @@ const { writeZip } = require('../core/zip.js');
 const Blank = require('../core/blank.js');
 const mapEffects = require('../core/map-effects.js');
 const variableRules = require('../core/variable-rules.js');
+const quests = require('../core/quests.js');
+const worldTime = require('../core/world-time.js');
+const mapEnemies = require('../core/map-enemies.js');
+const shop = require('../core/shop.js');
+const directions = require('../core/directions.js');
+const animated = require('../core/animated-portrait.js');
+const layered = require('../core/layered-portrait.js');
+const stage = require('../core/stage.js');
 
 module.exports = function (ctx) {
   const reg = ctx.registry;
@@ -47,7 +55,7 @@ module.exports = function (ctx) {
       }
     };
     for (const sub of ['data', 'www/data', 'img', 'www/img', 'audio', 'www/audio', 'movies', 'www/movies']) walk(path.join(p.gameDir, sub), sub);
-    for (const rel of ['js/plugins.js', mapEffects.PLUGIN_FILE, variableRules.PLUGIN_FILE]) {
+    for (const rel of ['js/plugins.js', 'js/plugins/' + stage.PLUGIN + '.js', mapEffects.PLUGIN_FILE, variableRules.PLUGIN_FILE, quests.PLUGIN_FILE, worldTime.PLUGIN_FILE, mapEnemies.PLUGIN_FILE, shop.PLUGIN_FILE, directions.PLUGIN_FILE, animated.PLUGIN_FILE, layered.PLUGIN_FILE]) {
       for (const f of [rel, 'www/' + rel]) {
         const full = path.join(p.gameDir, f);
         try { if (fs.statSync(full).mtimeMs > since) out.push({ file: full, name: f }); } catch { }

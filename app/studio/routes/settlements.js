@@ -37,6 +37,7 @@ function displayText(T, event) {
         case 121: line = actionLine({ type: 'switch', on: p[2] === 0 }, name('switch', p[0])); break;
         case 122: line = actionLine({ type: 'var', op: p[2], value: p[4] }, name('var', p[0])); break;
         case 126: line = actionLine({ type: 'item', add: p[1] === 0, count: p[3] }, name('item', p[0])); break;
+        default: line = T.script.gameplayLine({ code, indent, parameters: p });
       }
       lines.push('  '.repeat(indent) + line);
     }
@@ -66,12 +67,14 @@ module.exports = function ({ project, where, opts }) {
     const refsAt = r => ({ at: r.at, line: r.line, use: r.use, text: r.text,
       where: r.at.type === 'ce' && isSettlement(events[r.at.ce]) ? '结算组「' + events[r.at.ce].name + '」' : where(r.at) });
     const actions = collectActions(parseText(T, text));
-    need(actions.length, '至少写一条物品、变量或开关指令');
+    need(actions.length, '至少写一条结算指令');
     for (const a of actions) {
-      const key = a.type + ':' + a.id;
-      if (!targets.has(key)) targets.set(key, { kind: a.type, id: a.id, label: project.label(a.type, a.id), actions: [],
-        refs: T.xref.of(a.type, a.id).filter(r => r.at.type !== 'ce' || r.at.ce !== id).map(refsAt) });
-      targets.get(key).actions.push({ ...a, text: actionLine(a, T.script.refText(a.type, a.id)) });
+      const kind = a.kind || a.type, key = kind + ':' + a.id;
+      const label = kind === 'gold' ? '金币' : kind === 'party' ? '全队' : project.label(kind, a.id);
+      if (!targets.has(key)) targets.set(key, { kind, id: a.id, label, actions: [],
+        refs: T.xref.of(kind, a.id).filter(r => r.at.type !== 'ce' || r.at.ce !== id).map(refsAt) });
+      const text = a.type === 'gameplay' ? T.script.gameplayLine(a.commands[0]) : actionLine(a, T.script.refText(kind, a.id));
+      targets.get(key).actions.push({ ...a, text });
     }
     return { targets: [...targets.values()], callers: id ? T.xref.of('ce', id).map(refsAt) : [] };
   }
@@ -113,7 +116,7 @@ module.exports = function ({ project, where, opts }) {
           need(Number.isSafeInteger(a.value), pos + '的值要填整数');
           return { type: a.type, id, op: a.op, value: a.value };
         }) : parseText(T, b.text);
-        need(collectActions(actions).length, '至少写一条物品、变量或开关指令');
+        need(collectActions(actions).length, '至少写一条结算指令');
         const list = [settlementMark(), ...T.script.scriptCommands(actions), END()];
         let id = b.id == null ? 0 : int(b.id, '结算组编号不对');
         T.store.edit(['CommonEvents.json'], docs => {

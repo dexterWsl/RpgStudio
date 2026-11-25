@@ -20,12 +20,17 @@ const { MARK } = require('./scenes.js');
 const marks = require('./marks.js');
 
 const PLUGIN = 'RpgStudio_Stage';
-const VERSION = 15;
+const VERSION = 16;
 const DESCRIPTION = 'rpgStudio 演出：飘字、按名字动、场景里换人演、选项条件';
+const ENTRY = { name: PLUGIN, status: true, description: DESCRIPTION, parameters: {} };
+const PLUGIN_FILE = `js/plugins/${PLUGIN}.js`;
+const KEY = 'rpgStudioStage';
+const used = system => system?.[KEY] === true;
 
 // 插件指令和参数（MZ 的插件指令每个参数一行续行「谁 = 林屿」，跟 RPG Maker MZ 编辑器写出来的一样）
 const COMMANDS = {
   float: { text: '飘字', args: [['who', '谁'], ['text', '文字']] },
+  speech: { text: '文字气泡', args: [['who', '谁'], ['text', '文字']] },
   act: { text: '动作', args: [['who', '谁'], ['steps', '步骤'], ['wait', '等做完']] },
   as: { text: '扮演', args: [['who', '谁'], ['sheet', '行走图'], ['index', '编号']] },
   transfer: { text: '传送', args: [['who', '谁'], ['map', '地图'], ['x', 'X'], ['y', 'Y'], ['dir', '朝向'], ['steps', '到了以后']] },
@@ -40,7 +45,8 @@ const STEP_CODES = {
 };
 const BALLOON_STEPS = { '！': 1, '!': 1, '？': 2, '?': 2, '♪': 3, '♥': 4, '怒': 5, '汗': 6, '乱': 7, '…': 8, '……': 8, '灯': 9, 'Zzz': 10, 'zzz': 10 };
 const STEP_RE = /^(?:(上|下|左|右|前进|后退)(\d{1,2})?|等(\d+(?:\.\d+)?)秒?|速度([1-6]))$/;
-const validStep = s => STEP_RE.test(s) || s in STEP_CODES || s in BALLOON_STEPS;
+const DIAGONALS = { 转左下: 1, 转右下: 3, 转左上: 7, 转右上: 9 };
+const validStep = s => STEP_RE.test(s) || Object.hasOwn(DIAGONALS, s) || s in STEP_CODES || s in BALLOON_STEPS;
 // 朝向：0 = 不变（RPG Maker 的「场所移动」也是这几个数）
 const DIRS = { 下: 2, 左: 4, 右: 6, 上: 8 };
 const DIR_TEXT = { 2: '下', 4: '左', 6: '右', 8: '上' };
@@ -60,8 +66,9 @@ const pluginSource = () => `//==================================================
  *
  *   #飘字 林屿：真的是我的问题吗      字从林屿头上飘起来再淡掉（不挡剧情）
  *   #飘字 画面：……                 在画面中间随便一处飘
- *   #动作 赵磊 转身 ！ 下2 等0.5 转上
- *   #动作 王浩 跳 不等               不等 = 不等他做完，接着往下（两个人一起动）
+ *   #气泡 林屿：你好                在角色头顶显示文字气泡
+ *   #移动 赵磊 转身 ！ 下2 等0.5 转右上
+ *   #移动 王浩 跳 不等               不等 = 不等他做完，接着往下（两个人一起动）
  *
  * 场景（公共事件第一条是注释 <RpgStudioScene>）里：
  *   #扮演 圣佳                       主角的小人换成圣佳（数据库里叫这个名字的角色的行走图）
@@ -77,7 +84,7 @@ const pluginSource = () => `//==================================================
  * 「谁」：主角 / 本事件 / 带队角色的名字（= 主角）/ 正在扮演的人 / 这张地图上事件的名字
  *       （事件名「赵磊·吃饭/赵磊」「赵磊·走」这种也认得出是赵磊；有好几个时先找看得见的）。
  * 步骤：上 下 左 右 前进 后退（可带步数：上3、前进3）、靠近主角、远离主角、乱走、
- *       转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5（秒）、
+ *       转上 转下 转左 转右、转左上 转右上 转左下 转右下、转身、面向主角、背对主角、跳、等0.5（秒）、
  *       速度1~6、慢、快、隐身、现身、穿透、不穿透、踏步、停步、
  *       气泡：！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz
  * 走不过去的那一步会跳过，不会卡住。
@@ -88,6 +95,15 @@ const pluginSource = () => `//==================================================
  * @text 谁
  * @desc 主角 / 本事件 / 画面 / 地图上事件的名字；空 = 主角
  * @default
+ * @arg text
+ * @text 文字
+ * @default
+ *
+ * @command speech
+ * @text 文字气泡
+ * @arg who
+ * @text 谁
+ * @default 本事件
  * @arg text
  * @text 文字
  * @default
@@ -154,6 +170,7 @@ const pluginSource = () => `//==================================================
   const NAME = "${PLUGIN}";
   const MZ = typeof PluginManager.registerCommand === "function";
   const CODES = ${JSON.stringify(STEP_CODES)};
+  const DIAGONALS = ${JSON.stringify(DIAGONALS)};
   const BALLOONS = ${JSON.stringify(BALLOON_STEPS)};
   const SCENE_MARK = ${JSON.stringify(MARK)};
   const EV_MARK = "<RpgStudioMark>";   // 事件页最前面的标识注释，见 core/marks.js
@@ -194,7 +211,7 @@ const pluginSource = () => `//==================================================
     if (!ev || ev._trigger !== 4) return false;
     return $gameMap.isEventRunning() || $gameMessage.isBusy();
   }
-  function addFloat(interp, who, text) {
+  function addFloat(interp, who, text, speech) {
     text = String(text || "");
     if (!text || ambientBusy(interp)) return;
     const screen = String(who || "").trim() === "画面";
@@ -207,7 +224,7 @@ const pluginSource = () => `//==================================================
     const same = list.filter(f => (screen ? f.screen : !f.screen && JSON.stringify(f.ref) === JSON.stringify(charRef(ch))));
     for (const o of same) o.lift = (o.lift || 0) + (screen ? 40 : 32);
     const dx = same.length ? Math.round((Math.random() * 2 - 1) * 26) : 0;
-    const f = { id: ++serial, text, t: 0, life, dx, screen, ref: charRef(ch), big: screen, lift: 0, shown: 0 };
+    const f = { id: ++serial, text, t: 0, life, dx, screen, speech, ref: charRef(ch), big: screen, lift: 0, shown: 0 };
     if (screen) {
       f.x = Math.round(Graphics.width * (0.22 + Math.random() * 0.56));
       f.y = Math.round(Graphics.height * (0.34 + Math.random() * 0.36));
@@ -225,14 +242,27 @@ const pluginSource = () => `//==================================================
     const face = MZ ? $gameSystem.mainFontFace() : "GameFont";
     const probe = new Bitmap(1, 1);
     probe.fontFace = face; probe.fontSize = size;
-    const w = Math.ceil(probe.measureTextWidth(f.text)) + 16, h = size + 14;
+    const lines = [""];
+    if (f.speech) {
+      for (const letter of f.text) {
+        const i = lines.length - 1;
+        if (lines[i] && probe.measureTextWidth(lines[i] + letter) > 260) lines.push(letter);
+        else lines[i] += letter;
+      }
+    } else lines[0] = f.text;
+    const w = Math.ceil(Math.max(...lines.map(line => probe.measureTextWidth(line)))) + 20, h = lines.length * (size + 5) + 14;
     this.bitmap = new Bitmap(w, h);
     this.bitmap.fontFace = face;
     this.bitmap.fontSize = size;
     this.bitmap.outlineColor = "rgba(0, 0, 0, 0.8)";
-    this.bitmap.outlineWidth = 5;
+    this.bitmap.outlineWidth = f.speech ? 0 : 5;
     this.bitmap.textColor = "#f4f4f4";
-    this.bitmap.drawText(f.text, 0, 0, w, h, "center");
+    if (f.speech) {
+      this.bitmap.fillRect(0, 0, w, h - 5, "rgba(239, 232, 204, 0.95)");
+      this.bitmap.fillRect(1, 1, w - 2, h - 7, "rgba(24, 25, 30, 0.94)");
+      for (let i = 0; i < 5; i++) this.bitmap.fillRect(Math.floor(w / 2) - 5 + i, h - 5 + i, 10 - 2 * i, 1, "rgba(239, 232, 204, 0.95)");
+    }
+    lines.forEach((line, i) => this.bitmap.drawText(line, 0, 3 + i * (size + 5), w, size + 6, "center"));
     this.anchor.x = 0.5;
     this.anchor.y = 1;
     this.opacity = 0;
@@ -258,6 +288,12 @@ const pluginSource = () => `//==================================================
       bx = ch.screenX(); by = ch.screenY() - 54;
     }
     const k = f.t / f.life;
+    if (f.speech) {
+      this.x = Math.round(bx);
+      this.y = Math.round(Math.max(this.bitmap.height, by - 4));
+      this.opacity = Math.min(255, (1 - k) * 1020, 70 + f.t * 40);
+      return;
+    }
     // 被顶上去的那一段慢慢挪过去，不跳
     f.shown = (f.shown || 0) + ((f.lift || 0) - (f.shown || 0)) * 0.18;
     // 人在画面最上面（比如躺在靠墙的床上）：往上飘会出画面，改成从脚下往下排
@@ -433,14 +469,27 @@ const pluginSource = () => `//==================================================
       else if (s === "慢") push(29, [2]);
       else if (s === "快") push(29, [5]);
       else if (s === "跳") push(14, [0, 0]);
+      else if (DIAGONALS[s]) push(45, ["RpgStudioStage.faceDiagonal(this, " + DIAGONALS[s] + ")"]);
       else if (BALLOONS[s]) push(45, ["RpgStudioStage.balloon(this, " + BALLOONS[s] + ")"]);
       else if (CODES[s]) push(CODES[s]);
     }
     list.push({ code: 0, parameters: [] });
     return { list, repeat: false, skippable: true, wait: false };
   }
+  const _setDirection = Game_CharacterBase.prototype.setDirection;
+  Game_CharacterBase.prototype.setDirection = function(direction) {
+    this._rsDiagonal = 0;
+    _setDirection.call(this, direction);
+  };
   window.RpgStudioStage = {
     balloon(ch, id) { if (MZ) $gameTemp.requestBalloon(ch, id); else ch.requestBalloon(id); },
+    faceDiagonal(ch, direction) {
+      if (ch.isDirectionFixed()) return;
+      const horizontal = direction === 1 || direction === 7 ? 4 : 6;
+      const vertical = direction === 1 || direction === 3 ? 2 : 8;
+      ch.setDirection(ch.direction() === horizontal ? horizontal : vertical);
+      ch._rsDiagonal = direction;
+    },
   };
   function act(interp, who, steps, wait) {
     const ch = findCharacter(interp, who);
@@ -457,7 +506,7 @@ const pluginSource = () => `//==================================================
   const isSceneList = list => !!list && list.slice(0, 3).some(c => c && c.code === 108 && String(c.parameters[0] || "").startsWith(SCENE_MARK));
   function snapshot() {
     const p = $gamePlayer;
-    return { map: $gameMap.mapId(), x: p.x, y: p.y, d: p.direction(), as: p._rsAs || null, followers: p.followers().isVisible(),
+    return { map: $gameMap.mapId(), x: p.x, y: p.y, d: p.direction(), diagonal: p._rsDiagonal || 0, as: p._rsAs || null, followers: p.followers().isVisible(),
       transparent: p.isTransparent(), speed: p.moveSpeed(), through: !!p._through };
   }
   const _setup = Game_Interpreter.prototype.setup;
@@ -517,10 +566,10 @@ const pluginSource = () => `//==================================================
   }
   function restore(s) {
     const p = $gamePlayer;
-    const L = { as: s.as, followers: s.followers };
+    const L = { as: s.as, followers: s.followers, diagonal: s.diagonal || 0 };
     p.setTransparent(s.transparent); p.setMoveSpeed(s.speed); p.setThrough(s.through);
     if ($gameMap.mapId() !== s.map || p.x !== s.x || p.y !== s.y) { p._rsAsNext = L; p.reserveTransfer(s.map, s.x, s.y, s.d, 0); }
-    else { setLook(L); p.setDirection(s.d); p.center(p.x, p.y); }
+    else { setLook(L); p.setDirection(s.d); p._rsDiagonal = L.diagonal; p.center(p.x, p.y); }
   }
   // 场景里的「场所移动」也算场景里的事
   const _command201 = Game_Interpreter.prototype.command201;
@@ -559,12 +608,14 @@ const pluginSource = () => `//==================================================
   // 换地图：清掉飘字；要等传送过去才换的样子在这时候换上（performTransfer 里会 refresh）
   const _performTransfer = Game_Player.prototype.performTransfer;
   Game_Player.prototype.performTransfer = function() {
+    let L = null;
     if (this.isTransferring()) {
       if ($gameTemp) $gameTemp._rsFloats = [];
-      const L = this._rsAsNext;
+      L = this._rsAsNext;
       if (L) { this._rsAsNext = null; this._rsAs = L.as; if (L.followers) this.showFollowers(); else this.hideFollowers(); }
     }
     _performTransfer.call(this);
+    if (L && L.diagonal != null) this._rsDiagonal = L.diagonal;
   };
 
   // ---------- 选项条件（没装 WD_ConditionalChoice 时）----------
@@ -656,12 +707,12 @@ const pluginSource = () => `//==================================================
   // ---------- 插件指令 ----------
   const yes = v => v === true || v === "true";
   const run = (interp, cmd, a) => {
-    if (cmd === "float") addFloat(interp, a.who, a.text);
+    if (cmd === "float" || cmd === "speech") addFloat(interp, a.who, a.text, cmd === "speech");
     else if (cmd === "act") act(interp, a.who, a.steps, yes(a.wait));
     else if (cmd === "as") actAs(interp, a);
     else if (cmd === "transfer") sceneTransfer(interp, a);
   };
-  if (MZ) for (const cmd of ["float", "act", "as", "transfer"]) PluginManager.registerCommand(NAME, cmd, function(a) { run(this, cmd, a); });
+  if (MZ) for (const cmd of ["float", "speech", "act", "as", "transfer"]) PluginManager.registerCommand(NAME, cmd, function(a) { run(this, cmd, a); });
   // MV：插件指令是一行字「RpgStudio_Stage float {...}」
   const _pluginCommand = Game_Interpreter.prototype.pluginCommand;
   Game_Interpreter.prototype.pluginCommand = function(command, args) {
@@ -722,7 +773,7 @@ function ensure(root) {
     const at = list.lastIndexOf(']');
     if (at < 0) return did;
     const before = list.slice(0, at).replace(/\s*$/, '');
-    const entry = JSON.stringify({ name: PLUGIN, status: true, description: DESCRIPTION, parameters: {} });
+    const entry = JSON.stringify(ENTRY);
     const sep = /\[\s*$/.test(before) ? '\n' : ',\n';
     const next = before + sep + entry + '\n' + list.slice(at);
     const tmp = listFile + '.tmp-' + process.pid;
@@ -733,4 +784,4 @@ function ensure(root) {
   return did;
 }
 
-module.exports = { PLUGIN, VERSION, COMMANDS, STEP_CODES, BALLOON_STEPS, DIRS, DIR_TEXT, validStep, isStageCmd, parseCmd, commands, usesStage, hasChoiceCond, wants, ensure, pluginSource };
+module.exports = { PLUGIN, VERSION, ENTRY, PLUGIN_FILE, KEY, used, COMMANDS, STEP_CODES, BALLOON_STEPS, DIRS, DIR_TEXT, validStep, isStageCmd, parseCmd, commands, usesStage, hasChoiceCond, wants, ensure, pluginSource };

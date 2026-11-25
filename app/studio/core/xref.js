@@ -9,7 +9,13 @@ const { posix } = require('path');
 const impact = require('./impact.js');
 const choicecond = require('./choicecond.js');
 const { parseCmd: parseStageCmd } = require('./stage.js');
+const { questsOf, readQuestInstruction } = require('./quests.js');
+const { clockVariables } = require('./world-time.js');
+const catalog = ['item', 'weapon', 'armor'];
+const { readShop } = require('./shop.js');
+const { sheets: diagonalSheets } = require('./directions.js');
 const { rulesOf, describePassive } = require('./variable-rules.js');
+const layered = require('./layered-portrait.js');
 
 const SCRIPT_REFS = [
   [/\$gameSwitches\.(?:setValue|value)\(\s*(\d+)\s*[,)]/g, 'switch'],
@@ -42,6 +48,9 @@ function createXref(project, describer) {
 
   function build() {
     const refs = [];
+    const system = P.read('System.json');
+    const quests = questsOf(system);
+    const questByVariable = new Map(quests.map(q => [q.variable, q.id]));
     const add = (kind, id, use, at, line, text, rule) => { if (STR_KINDS.has(kind) ? !!id : Number(id) > 0) refs.push({ kind, id: STR_KINDS.has(kind) ? String(id) : Number(id), use, at, line, text, ...(rule ? { rule } : {}) }); };
     each((at, list, cond, owner) => {
       function preview(start = 0, stop = list.length, indent = 0) {
@@ -54,7 +63,11 @@ function createXref(project, describer) {
       }
       function addRule(type, line, text, groups, details = {}) {
         const rule = { type, groups, ...details };
-        for (const { kind, id } of impact.targets(groups)) add(kind, id, 'check', at, line, text, rule);
+        for (const { kind, id } of impact.targets(groups)) {
+          add(kind, id, 'check', at, line, text, rule);
+          const quest = kind === 'var' && questByVariable.get(id);
+          if (quest) add('quest', quest, 'check', at, line, text);
+        }
       }
       function moveRoute(route, line) {
         for (const step of route?.list || []) {
@@ -103,7 +116,8 @@ function createXref(project, describer) {
               }
               addRule('branch', i, t(), groups, { preview: preview(i + 1, otherwise < 0 ? end : otherwise, c.indent + 1), alternative: otherwise < 0 ? null : preview(otherwise + 1, end, c.indent + 1) });
             } else if (p[0] === 4) add('actor', p[1], 'check', at, i, t());
-            else if (p[0] === 8) add('item', p[1], 'check', at, i, t());
+            else if (p[0] === 7) add('gold', 1, 'check', at, i, t());
+            else if ([8, 9, 10].includes(p[0])) add(catalog[p[0] - 8], p[1], 'check', at, i, t());
             else if (p[0] === 12) scan(String(p[1] || ''), at, i, 'script');
             break;
           }
@@ -119,9 +133,9 @@ function createXref(project, describer) {
           case 103: case 104: add('var', p[0], 'set', at, i, t()); break;
           case 285: add('var', p[0], 'set', at, i, t()); if (p[2] === 1) readVars(p[3], p[4]); break;
           case 117: add('ce', p[0], 'call', at, i, t()); break;
-          case 125: if (p[1] === 1) readVars(p[2]); break;
+          case 125: add('gold', 1, 'set', at, i, t()); if (p[1] === 1) readVars(p[2]); break;
           case 126: case 127: case 128:
-            if (c.code === 126) add('item', p[0], 'set', at, i, t());
+            add(catalog[c.code - 126], p[0], 'set', at, i, t());
             if (p[2] === 1) readVars(p[3]);
             break;
           case 129: add('actor', p[0], 'set', at, i, t()); break;
@@ -130,17 +144,46 @@ function createXref(project, describer) {
           case 203: if (p[1] === 1) readVars(p[2], p[3]); break;
           case 205: moveRoute(p[1], i); break;
           case 231: case 232:
-            if (c.code === 231) add('picture', p[1], 'show', at, i, t());
+            if (c.code === 231) {
+              const portrait = layered.readPicture(p[1]);
+              if (portrait) add('actor', portrait.actor, 'show', at, i, t());
+              else add('picture', p[1], 'show', at, i, t());
+            }
             if (p[3] === 1) readVars(p[4], p[5]);
             break;
           case 301: if (p[0] === 1) readVars(p[1]); break;
-          case 355: case 655: scan(String(p[0] || ''), at, i, 'script'); break;
+          case 302: case 605:
+            if (catalog[p[0]]) add(catalog[p[0]], p[1], 'show', at, i, '商店商品');
+            break;
+          case 314: case 315: case 318:
+            if (p[0] === 1) readVars(p[1]);
+            else add(p[1] ? 'actor' : 'party', p[1] || 1, 'set', at, i, t());
+            if (c.code === 315 && p[3] === 1) readVars(p[4]);
+            if (c.code === 318) add('skill', p[3], 'set', at, i, t());
+            break;
+          case 355: case 655: {
+            const shop = readShop(c);
+            if (!shop) { scan(String(p[0] || ''), at, i, 'script'); break; }
+            for (const row of shop.goods) {
+              if (catalog[row.kind]) add(catalog[row.kind], row.id, 'show', at, i, '商店商品');
+              if (row.currency) add('var', row.currency, row.price == null ? 'read' : 'set', at, i, row.price == null ? '商店金币定价' : '商店代币结算');
+              if (row.conditions) addRule('shop', i, '商品购买条件', row.conditions.map(group => group.map(p => impact.commandTest(p, describer)[0][0])));
+            }
+            break;
+          }
           case 322:
             if (p[1]) add('sprite', p[1] + '#' + (p[2] || 0), 'set', at, i, '更改角色图像');
             if (p[3]) add('face', p[3] + '#' + (p[4] || 0), 'set', at, i, '更改角色图像');
             break;
           case 323: if (p[1]) add('sprite', p[1] + '#' + (p[2] || 0), 'set', at, i, '更改载具图像'); break;
           case 356: case 357: {
+            const action = readQuestInstruction(c);
+            if (action) {
+              const quest = quests.find(q => q.id === action.id);
+              add('quest', action.id, 'set', at, i, action.action + (action.step ? ' · 第 ' + action.step + ' 步' : ''));
+              if (quest) add('var', quest.variable, 'set', at, i, '任务 · ' + quest.name);
+              break;
+            }
             const stage = parseStageCmd(c);
             if (stage?.cmd === 'as' && stage.args?.sheet) add('sprite', stage.args.sheet + '#' + (Number(stage.args.index) || 0), 'set', at, i, '场景 · 扮演');
             break;
@@ -160,7 +203,13 @@ function createXref(project, describer) {
         }
       });
     });
-    const system = P.read('System.json');
+    for (const quest of quests) {
+      const at = { type: 'quest', quest: quest.id };
+      if (quest.reward) add('ce', quest.reward, 'call', at, -1, '任务完成奖励');
+      if (quest.acceptSwitch) add('switch', quest.acceptSwitch, 'check', at, -1, '任务接取条件');
+      if (quest.finishSwitch) add('switch', quest.finishSwitch, 'check', at, -1, '任务完成条件');
+    }
+    for (const id of clockVariables(system)) add('var', id, 'set', { type: 'world-time' }, -1, '世界时间同步');
     const variableRules = rulesOf(system);
     for (const [key, passive] of Object.entries(variableRules.passive)) {
       const id = Number(key);
@@ -176,6 +225,10 @@ function createXref(project, describer) {
       const text = tests.map(describer.condText).join(group.mode === 'any' ? ' 或者 ' : ' 并且 ');
       add('switch', id, 'set', at, -1, '条件决定布尔结果 · ' + text);
       for (const target of impact.targets(rule.groups)) add('var', target.id, 'check', at, -1, text, rule);
+    }
+    for (const [name, pose] of Object.entries(diagonalSheets(system))) {
+      add('sprite', name + '#0', 'show', { type: 'system' }, -1, '绑定斜向站姿「' + pose + '」');
+      add('sprite', pose + '#0', 'show', { type: 'system' }, -1, '「' + name + '」的斜向站姿');
     }
     // 数据库角色的行走图 / 头像
     for (const a of project.read('Actors.json') || []) {

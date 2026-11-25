@@ -32,23 +32,30 @@ async function sceneDialog(opts = {}, st = null) {
           <div class="fgrid"><label for="scName">名字</label><input id="scName" maxlength="40" placeholder="比如：图书馆的夜谈" value="${esc(st.name)}"></div>
           <div class="csec"><span class="csec-t">谁说什么</span><span class="faint">点名字插一句「名字：」；一行一句「名字：台词」，「#选项 去 | 不去」下面每行用 #1 #2 开头</span></div>
           <div class="scchips scpeople">${actors.map(a => `<button type="button" class="small" data-sa="${esc(a.name)}">${esc(a.name)}</button>`).join('')}</div>
-          <div class="csec"><span class="csec-t">插点别的</span><span class="faint">不占对话框，插在要发生的位置：传送（可以换人演）、扮演、飘字、动作（移动路线写「动作 本事件 下3 左2」）、关掉还在显示的 CG。场景里的传送和扮演，场景播完自动换回主角</span></div>
+          <div class="csec"><span class="csec-t">插入</span></div>
           <div class="scchips sctools">
-            <button type="button" class="small" id="scPicBtn" data-ins="pic" aria-expanded="false">插入 CG…</button>
+            ${writingToolGroup('数值', `
             <button type="button" class="small" id="scItemBtn" data-ins="item" aria-expanded="false">插入物品…</button>
             <button type="button" class="small" id="scVarBtn" data-ins="var" aria-expanded="false">插入变量…</button>
             <button type="button" class="small" data-ins2="sw">插入开关…</button>
-            <button type="button" class="small" data-ins2="sc">插入场景…</button>
             <button type="button" class="small" data-ins="settlement" aria-expanded="false">插入结算…</button>
-            <button type="button" class="small" data-ins2="tp">插入传送…</button>
+            <button type="button" class="small" data-ins2="collect">选中多行收成结算组</button>`)}
+            ${writingToolGroup('事件', `
+            <button type="button" class="small" data-ins2="sc">插入场景…</button>
+            <button type="button" class="small" data-ins2="quest">插入任务…</button>
+            <button type="button" class="small" data-ins2="shop">插入商店…</button>
+            <button type="button" class="small" data-ins2="tp">插入传送…</button>`)}
+            ${writingToolGroup('演出', `
+            <button type="button" class="small" id="scPicBtn" data-ins="pic" aria-expanded="false">插入 CG…</button>
             <button type="button" class="small" data-ins2="as" title="场景里主角的小人换成别人，场景播完自动换回">插扮演…</button>
             <button type="button" class="small" data-ins2="float">插飘字…</button>
-            <button type="button" class="small" data-ins2="act">插动作…</button>
+            <button type="button" class="small" data-ins2="act">插入移动…</button>
             <button type="button" class="small" data-ins="bol" aria-expanded="false">插气泡…</button>
-            <button type="button" class="small" data-sins="#清图">#清图</button>
+            <button type="button" class="small" data-sins="#清图">清图</button>`)}
           </div>
           <div id="scPics" class="picture-picker scpics" hidden></div>
           <textarea id="scText" rows="12" placeholder="老船长：今晚的海很安静。&#10;#图 cg_harbor&#10;小鱼：嗯……&#10;#清图">${esc(st.text)}</textarea>
+          ${writingHelp({ scene: true })}
         </div>
         <div class="scprev" aria-label="预览">
           <div class="scprev-h"><b>预览</b><span class="faint">边写边看</span><span class="sp"></span><button type="button" class="small primary" id="scPlay">▶ 播放</button></div>
@@ -68,6 +75,8 @@ async function sceneDialog(opts = {}, st = null) {
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>${placing ? '放在这里' : p ? '新建并放在这里' : opts.link ? '新建并关联' : '新建场景'}</button></footer>`,
     (d, done) => {
       if (!placing) d.classList.add('dlg-wide');
+      bindMenu(d);
+      bindWritingHelp(d);
       $$('[data-x]', d).forEach(b => b.onclick = () => done(null));
       const err = m => { $('#scErr', d).innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
       const ta = $('#scText', d);
@@ -99,9 +108,23 @@ async function sceneDialog(opts = {}, st = null) {
       if (ta) {
         $$('[data-sa]', d).forEach(b => b.onclick = () => insert(b.dataset.sa + '：'));
         $$('[data-sins]', d).forEach(b => b.onclick = () => insert(b.dataset.sins + '\n'));
-        // 传送 / 飘字 / 动作（移动路线也写「动作 本事件 下3 左2」）
+        // 传送 / 飘字 / 移动
         $$('[data-ins2]', d).forEach(b => b.onclick = async () => {
           const kind = b.dataset.ins2;
+          if (kind === 'collect') {
+            try { await collectSettlementSelection(ta); } catch (error) { err(error.message); }
+            return;
+          }
+          if (kind === 'quest') {
+            try { const line = await questCommandDialog(d); if (line && d.open) insert(line + '\n'); }
+            catch (error) { err(error.message); }
+            return;
+          }
+          if (kind === 'shop') {
+            try { const block = await shopWritingBlock(); if (block && d.open) insert(block + '\n'); }
+            catch (error) { err(error.message); }
+            return;
+          }
           if (kind === 'sw') { const n = await pickDialog('插入开关', 'lookup?kind=switch'); if (n) insert('#开关 ' + n + ' 开\n'); return; }
           if (kind === 'sc') {
             const n = await scenePicker();
@@ -110,9 +133,9 @@ async function sceneDialog(opts = {}, st = null) {
           }
           if (kind === 'tp') { const t = await transferDialog(p ? p.map : 0, { scene: true }); if (t) insert(transferLine(t) + '\n'); return; }
           if (kind === 'as') { const l = await asDialog(); if (l) insert(l + '\n'); return; }
-          const who = await whoDialog(kind === 'float' ? '飘字：字从谁头上冒出来' : '动作 / 移动路线：谁动', kind === 'float' ? ['画面'] : []);
+          const who = await whoDialog(kind === 'float' ? '飘字：字从谁头上冒出来' : '移动路线：谁动', kind === 'float' ? ['画面'] : []);
           if (!who) return;
-          insert(kind === 'float' ? '#飘字 ' + who + '：' : '#动作 ' + who + ' \n');
+          insert(kind === 'float' ? '#飘字 ' + who + '：' : '#移动 ' + who + ' \n');
         });
         // 插入工具（CG / 物品 / 变量）共用下面这块选择区：点一下展开，选完插到光标处，再点一次收起
         const pickBox = $('#scPics', d);

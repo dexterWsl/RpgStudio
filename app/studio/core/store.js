@@ -82,13 +82,25 @@ function createStore(project, opts = {}) {
     files = [...new Set(files)];
     const creatable = new Set(eo.create || []);
     const docs = {};
-    for (const f of files) {
+    function read(f) {
       if (!/^[A-Za-z0-9_]+\.json$/.test(f)) throw new Error('文件名不合法：' + f);
       docs[f] = P.readFresh(f);
       if (docs[f] == null && !creatable.has(f) && !opts.allowCreate) throw new Error('找不到 ' + f);
     }
+    for (const f of files) read(f);
     const result = mutate(docs);
     const changed = files.filter(f => JSON.stringify(docs[f]) !== JSON.stringify(P.read(f)));
+    if (changed.length && opts.prepare) {
+      const included = new Set();
+      opts.prepare(changed, docs, f => {
+        if (!files.includes(f) && !included.has(f)) read(f);
+        included.add(f);
+        return docs[f];
+      });
+      for (const f of included) {
+        if (!changed.includes(f) && JSON.stringify(docs[f]) !== JSON.stringify(P.read(f))) changed.push(f);
+      }
+    }
     if (!changed.length) return { changed: [], result };
     const backupDir = backup(changed);
     const staged = [];

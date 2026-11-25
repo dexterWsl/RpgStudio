@@ -32,11 +32,12 @@
 //   #消失                    这个事件先不见（离开地图再回来又在：打倒的怪、拿走的东西）
 //   #独立开关 A 开           这个事件自己的开关（只播一次的剧情用）
 //   #回到标题                结局放完回到标题画面
+//   #战斗 敌群名             开始这场战斗，可以逃跑；输了回到原来的地方，不进游戏结束
 //   人物和镜头：
 //   #飘字 [谁：]文字         字从人物头上一句一句飘起来再淡掉（不挡剧情）；谁 = 主角 / 本事件 / 画面 / 事件名字，不写 = 主角
-//   #动作 谁 步骤… [不等]    按名字让人物动：上 下 左 右（上3）、前进3、转身、面向主角、背对主角、跳、后退、等0.5、气泡 ！ ？…
+//   #移动 谁 步骤… [不等]    按名字让人物动：上 下 左 右（上3）、前进3、转身、面向主角、背对主角、跳、后退、等0.5、气泡 ！ ？…
 //   #扮演 谁 [行走图 编号]   只在场景里：主角的小人换成这个人（角色名 = 用这个角色的行走图；#扮演 主角 = 换回来）
-//                            （#飘字 #动作 #扮演、带人的 #传送 是演出插件 RpgStudio_Stage 的插件指令，第一次用时编辑器自动把插件装进游戏）
+//                            （#飘字 #移动 #扮演、带人的 #传送 用演出插件 RpgStudio_Stage，第一次用时编辑器自动把插件装进游戏）
 //   #镜头 方向 格数 [速度]   镜头平移（上下左右，速度 1~6，默认 3），移完再往下
 //   #天气 雨|暴雨|雪|无 [强度] [秒]
 //   #闪光 [白|红] [秒]
@@ -45,6 +46,10 @@
 const { newPicState } = require('./merge.js');
 const stage = require('./stage.js');
 const { isSettlement, settlementBody, settlementId, settlementRef } = require('./settlements.js');
+const { createGameplayCommands } = require('./gameplay-commands.js');
+const { shopStart, shopEnd, readBlock } = require('./shop.js');
+const layered = require('./layered-portrait.js');
+const layeredCues = require('./layered-cues.js');
 
 // 色调预设：[红, 绿, 蓝, 灰]
 const TINTS = { 正常: [0, 0, 0, 0], 夜晚: [-68, -68, 0, 68], 深夜: [-110, -110, -34, 102], 黄昏: [68, -34, -34, 0], 回忆: [34, -34, -68, 170], 灰暗: [-34, -34, -34, 170], 红: [68, -68, -68, 0] };
@@ -53,8 +58,9 @@ const BALLOONS = { '！': 1, '!': 1, '？': 2, '?': 2, '♪': 3, '♥': 4, '怒'
 const BALLOON_TEXT = ['', '！', '？', '♪', '♥', '怒', '汗', '乱', '…', '灯', 'Zzz'];
 const BUST_DIR = '立绘/';
 const BUST_POS = { 左: 0.22, 中: 0.5, 右: 0.78 };
+const BUST_SIDES = { 左: 'left', 中: 'center', 右: 'right' };
 const bustName = (who, face) => BUST_DIR + who + '_' + face;
-const parseBustName = n => { const m = /^立绘\/(.+?)_([^/]+)$/.exec(String(n || '')); return m ? { who: m[1], face: m[2] } : null; };
+const parseBustName = n => { const m = /^立绘\/(.+?)_([^/]+)$/.exec(String(n || '')); return m ? { who: m[1], face: m[2] } : layered.readPicture(n); };
 const sameTone = (a, b) => (a || []).length === 4 && a.every((v, i) => Number(v) === b[i]);
 // 字幕居中：前面垫全角空格（对话框一行大约 30 个汉字宽；英文、数字算半个）
 const textWidth = t => [...String(t)].reduce((n, ch) => n + (/[\u0000-\u00ff]/.test(ch) ? 0.5 : 1), 0);
@@ -78,7 +84,7 @@ function stepTokens(toks) {
 const DIR_RE = /^面?朝(上|下|左|右)$/;
 const secText = f => String(Math.round(Number(f) / 60 * 100) / 100);
 
-const STEP_HELP = '能写：上 下 左 右 前进 后退（可带步数：上3、前进3）、靠近主角、远离主角、转上 转下 转左 转右、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、穿透、不穿透，气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz';
+const STEP_HELP = '能写：上 下 左 右 前进 后退（可带步数：上3、前进3）、靠近主角、远离主角、转上 转下 转左 转右 转左上 转右上 转左下 转右下、转身、面向主角、背对主角、跳、等0.5、速度1~6、慢、快、隐身、现身、穿透、不穿透，气泡 ！ ？ ♪ ♥ 怒 汗 乱 … 灯 Zzz';
 
 function createScript(project, opts = {}) {
   const P = project;
@@ -89,14 +95,44 @@ function createScript(project, opts = {}) {
   const picSize = n => { try { return (opts.picSize && opts.picSize(n)) || { w: 0, h: 0 }; } catch { return { w: 0, h: 0 }; } };
   // 立绘固定用剧情图片编号段最上面的三个号（左 = 最大，中、右往下），总在 CG 上面
   const bustId = pos => pics.max - ({ 左: 0, 中: 1, 右: 2 }[pos] || 0);
-  function bustParams(who, face, pos) {
-    const S = screen(), sz = picSize(bustName(who, face));
+  const originalPlacement = name => {
+    const tag = layered.readPicture(name);
+    return tag && layered.layoutsOf(P.sys())[tag.actor]?.placement;
+  };
+  function bustParams(name, pos) {
+    const S = screen(), tag = layered.readPicture(name);
+    if (tag?.screen) return [bustId(pos), name, 1, 0, 0, 0, 100, 100, 255, 0];
+    if (pos === '原位') {
+      const placement = originalPlacement(name);
+      if (!placement) throw new Error('只有从事件提取的立绘才有原位');
+      return [bustId(posOfX(placement.x)), name, 1, 0, placement.x, placement.y, 100, 100, 255, 0];
+    }
+    if (tag) return [bustId(pos), name, 1, 0, Math.round(S.w * BUST_POS[pos]), S.h, 100, 100, 255, 0];
+    const sz = picSize(name);
     const x = Math.round(S.w * BUST_POS[pos]), y = sz.h ? Math.round(S.h - sz.h / 2) : Math.round(S.h / 2);
-    return [bustId(pos), bustName(who, face), 1, 0, x, y, 100, 100, 255, 0];
+    return [bustId(pos), name, 1, 0, x, y, 100, 100, 255, 0];
+  }
+  function bustAsset(it, side) {
+    const name = bustName(it.who, it.face);
+    if (!it.action && it.pos !== '原位' && picSize(name).h) return name;
+    const actor = layered.resolveActor(P, it.who);
+    const layout = actor && layered.layoutsOf(P.sys())[actor.id];
+    if (layered.hasFace(layout, it.face)) {
+      if (it.action && !layered.hasAction(layout, it.action)) throw new Error(`找不到「${it.who}」的立绘动作「${it.action}」`);
+      return layered.pictureName(actor.id, it.who, it.face, it.action || 'still', side);
+    }
+    if (it.action) throw new Error(`找不到「${it.who}」的分层立绘表情「${it.face}」`);
+    return name;
   }
   const posOfX = x => { const S = screen(); let best = '中', d = 1e9; for (const [k, f] of Object.entries(BUST_POS)) { const dd = Math.abs(S.w * f - x); if (dd < d) { d = dd; best = k; } } return best; };
   // 屏幕上正在显示的这个人的立绘：[图片编号, 图名]
-  const bustSlotOf = (slots, who) => [...slots.entries()].find(([, v]) => { const b = parseBustName(v); return b && b.who === who; });
+  const bustSlotOf = (slots, who) => {
+    const entries = [...slots];
+    const exact = entries.find(([, name]) => parseBustName(name)?.who === who);
+    if (exact || !entries.some(([, name]) => layered.readPicture(name))) return exact;
+    const actor = layered.resolveActor(P, who);
+    return actor ? entries.find(([, name]) => layered.readPicture(name)?.actor === actor.id) : undefined;
+  };
   const isBustId = id => id >= pics.max - 2 && id <= pics.max;
   const mz = opts.engine !== 'MV';
   // 插件指令（#插件）：参数表从 js/plugins/<插件名>.js 读；没有就写不了
@@ -123,6 +159,7 @@ function createScript(project, opts = {}) {
     return first && first.id === Number(id) ? nm : String(id);
   }
   const exists = (kind, id) => P.has(kind, id);
+  const gameplay = createGameplayCommands(P, resolveRef, refText, mz);
   // 扮演 / 传送里的「谁」：数据库里名字完全一样的角色（游戏里按名字找行走图）
   const actorByName = who => (P.read('Actors.json') || []).find(a => a && String(a.name || '').trim() === String(who || '').trim()) || null;
   const isProtagonist = who => ['主角', '玩家'].includes(String(who || '').trim());
@@ -166,6 +203,8 @@ function createScript(project, opts = {}) {
   }
   // 一个条件 → 111 的参数（开关：[0,id,0|1]，变量：[1,id,0,值,比较]）
   function condOne(t, { strict, allowMissingTargets }) {
+    const questCondition = gameplay.condition(t);
+    if (questCondition) return questCondition;
     for (const [word, sym] of COND_WORDS) {
       const at = t.lastIndexOf(word);
       if (at <= 0) continue;
@@ -180,6 +219,11 @@ function createScript(project, opts = {}) {
       if (strict && !Number.isSafeInteger(Number(val))) throw new Error('比较值超出安全整数范围');
       return [1, id, 0, Number(val), COND_OP[sym]];
     }
+    const exact = kind => P.rows(kind).filter(row => row.name && row.name.trim().toLowerCase() === t.toLowerCase());
+    const variables = exact('var'), switches = exact('switch');
+    if (variables.length + switches.length > 1) throw new Error('条件名称有重名，请写变量比较或指定开关');
+    if (variables.length) return [1, variables[0].id, 0, 0, COND_OP['!=']];
+    if (switches.length) return [0, switches[0].id, 0];
     const sw = /^(?:开关\s*)?(.+?)\s*(开|关)$/.exec(t);
     if (sw) {
       const id = resolveRef(sw[1].trim(), 'switch');
@@ -196,7 +240,7 @@ function createScript(project, opts = {}) {
     ? (p[2] ? `$gameSwitches.value(${p[1]}) === false` : `$gameSwitches.value(${p[1]})`)
     : `$gameVariables.value(${p[1]}) ${['==', '>=', '<=', '>', '<', '!='][p[4]] || '=='} ${p[3]}`;
   // #如果 / #条件 后面那段：先拆 并且 / 或者，再一个个认
-  function condParams(text, options = {}) {
+  function condGroups(text, options = {}) {
     const { strict } = options;
     let t = String(text || '').trim();
     // 外面套了方括号 / 圆括号（[变量 X>=30]、【…】）先剥掉
@@ -216,10 +260,13 @@ function createScript(project, opts = {}) {
     if (!ors.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
     const groups = ors.filter(g => strict || g).map(g => g.split(/\s*(?:并且|而且|同时|且|&&|&)\s*/).map(s => s.trim()).filter(s => strict || s));
     if (strict && groups.some(g => g.some(s => !s))) throw new Error('请补全条件');
-    const flat = groups.flat();
-    if (!flat.length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
-    if (flat.length === 1) return condOne(flat[0], options);
-    const parts = groups.map(g => g.map(one => condJS(condOne(one, options))).join(' && '));
+    if (!groups.flat().length) throw new Error('条件没写：（例：#如果 变量 DayCount >= 3）');
+    return groups.map(g => g.map(one => condOne(one, options)));
+  }
+  function condParams(text, options) {
+    const groups = condGroups(text, options);
+    if (groups.length === 1 && groups[0].length === 1) return groups[0][0];
+    const parts = groups.map(g => g.map(condJS).join(' && '));
     return [12, parts.length === 1 ? parts[0] : parts.map(p => '(' + p + ')').join(' || ')];
   }
 
@@ -231,10 +278,12 @@ function createScript(project, opts = {}) {
       (last.more = last.more || []).push(m[1].trim());
       return true;
     };
-    let choice = null;
+    let choice = null, shop = null;
     const stack = [];                                   // 还没收尾的 #如果
     const target = () => (stack.length ? stack[stack.length - 1].branch : items);
     const parseOne = line => {
+      const basic = gameplay.parse(line, { allowMissingTargets });
+      if (basic) return basic;
       const pic = /^[#＃]\s*(?:图|CG|cg|显示图片)[\s:：]+(.+)$/.exec(line);
       if (pic) return { type: 'pic', name: pic[1].trim() };
       const cl = /^[#＃]\s*(?:清除图片|关闭图片|清图|关图|不要图)\s*[:：]?\s*(.*)$/.exec(line);
@@ -247,6 +296,8 @@ function createScript(project, opts = {}) {
       if (w) return { type: 'wait', sec: Number(w[1]) };
       const sw = /^[#＃]\s*开关\s*(.+?)\s*(开|关)$/.exec(line);
       if (sw) return { type: 'switch', id: resolveRef(sw[1], 'switch'), on: sw[2] === '开' };
+      const bt = /^[#＃]\s*战斗[\s:：]+(.+)$/.exec(line);
+      if (bt) return { type: 'battle', id: resolveRef(bt[1].trim(), 'troop'), ref: bt[1].trim() };
       const vr = /^[#＃]\s*变量\s*(.+?)\s*([+\-−=*×/÷%])\s*(-?\d+)$/.exec(line);
       if (vr) {
         const ops = { '+': 1, '-': 2, '−': 2, '=': 0, '*': 3, '×': 3, '/': 4, '÷': 4, '%': 5 };
@@ -268,12 +319,33 @@ function createScript(project, opts = {}) {
       if (tn && TINTS[tn[1]]) return { type: 'tint', tone: tn[1], sec: tn[2] != null ? Number(tn[2]) : 1 };
       const sk = /^[#＃]\s*震动(?:[\s:：]*([1-9]))?$/.exec(line);
       if (sk) return { type: 'shake', power: sk[1] ? Number(sk[1]) : 5 };
-      const bl = /^[#＃]\s*气泡[\s:：]+(\S+)(?:\s+(主角|玩家|本事件|这个人))?$/.exec(line);
-      if (bl && BALLOONS[bl[1]]) return { type: 'balloon', balloon: BALLOONS[bl[1]], target: bl[2] === '本事件' || bl[2] === '这个人' ? 0 : -1 };
+      const bl = /^[#＃]\s*气泡[\s:：]+(\S+)(?:\s+(.+))?$/.exec(line);
+      const speech = /^[#＃]\s*气泡(?:\s+([^:：]*?))?\s*[:：]\s*(.+)$/.exec(line);
+      if (speech) return { type: 'speech', who: speech[1]?.trim() || '本事件', text: speech[2].trim() };
+      if (bl && Object.hasOwn(BALLOONS, bl[1])) {
+        const who = bl[2] || '主角', balloon = BALLOONS[bl[1]];
+        if (who === '本事件' || who === '这个人') return { type: 'balloon', balloon, target: 0 };
+        if (who === '主角' || who === '玩家') return { type: 'balloon', balloon, target: -1 };
+        const steps = bl[1] === '...' ? '…' : bl[1];
+        return { type: 'act', who, steps, wait: true };
+      }
       const cap = /^[#＃]\s*字幕[\s:：]+(.+)$/.exec(line);
       if (cap) return { type: 'caption', lines: cap[1].split(/[｜|]/).map(x => x.trim()).filter(Boolean).slice(0, 4) };
-      const bu = /^[#＃]\s*立绘[\s:：]+(\S+)\s+(\S+?)(?:\s+(左|中|右))?$/.exec(line);
-      if (bu) return { type: 'bust', who: bu[1], face: bu[2], pos: bu[3] || '' };
+      const cue = layeredCues.parse(line);
+      if (cue && layered.used(P.sys())) return { type: 'layeredCue', op: cue };
+      const bu = /^[#＃]\s*立绘[\s:：]+(\S+)\s+(\S+?)(?:\s+(左|中|右|原位))?(?:\s+动作[=＝](\S+))?$/.exec(line);
+      if (bu) {
+        return { type: 'bust', who: bu[1], face: bu[2], pos: bu[3] || '', action: bu[4] && (Object.hasOwn(layered.builtInLabels, bu[4]) ? layered.builtInLabels[bu[4]] : bu[4]) };
+      }
+      const oneBust = /^[#＃]\s*立绘[\s:：]+(\S+)$/.exec(line);
+      if (oneBust && layered.used(P.sys())) {
+        const ref = oneBust[1], actor = layered.resolveActor(P, ref), layouts = layered.layoutsOf(P.sys());
+        if (actor && layouts[actor.id]) return { type: 'bust', who: ref, face: layered.faceDefault, pos: '', action: 'still', fitted: true };
+        const named = Object.values(layouts);
+        const state = ['自动', '正常'].includes(ref) || named.some(layout => Object.hasOwn(layout.states || {}, ref));
+        const action = named.some(layout => Object.hasOwn(layout.programs || {}, ref));
+        return { type: 'layeredCue', op: [!state && action ? 'action' : 'state', ref] };
+      }
       const ub = /^[#＃]\s*退场(?:[\s:：]+(\S+))?$/.exec(line);
       if (ub) return { type: 'unbust', who: ub[1] || '' };
       const settle = /^[#＃]\s*结算(?:(?:[ \t]+|[:：][ \t]*)(.*))?$/.exec(line);
@@ -302,7 +374,8 @@ function createScript(project, opts = {}) {
         const w = /^([^：:\s]{1,12})[：:]\s*(.+)$/.exec(fl[1].trim());
         return w ? { type: 'float', who: w[1], text: w[2].trim() } : { type: 'float', who: '', text: fl[1].trim() };
       }
-      const ac = /^[#＃]\s*动作[\s:：]+(\S+)(?:\s+(.+))?$/.exec(line);
+      const ac = /^[#＃]\s*(?:移动|动作)[\s:：]+(\S+)(?:\s+(.+))?$/.exec(line);
+      if (/^[#＃]\s*面向主角\s*$/.test(line)) return { type: 'act', who: '本事件', steps: '面向主角', wait: true };
       if (ac) {
         const toks = stepTokens(String(ac[2] || '').trim().split(/\s+/).filter(Boolean));
         let wait = true;
@@ -325,6 +398,22 @@ function createScript(project, opts = {}) {
       const line = raw.trim();
       if (!line) continue;
       const lineError = message => new Error((settlement ? '第 ' + (i + 1) + ' 行 · ' : '') + message);
+      if (shop) {
+        if (!shopEnd.test(line)) { shop.lines.push(line); continue; }
+        const commands = readBlock(shop.lines, { buyOnly: shop.buyOnly,
+          ref(value, kind) {
+            const id = resolveRef(value, kind);
+            if (!exists(kind, id)) throw new Error('商店中找不到' + P.label(kind, 0).split(' ')[0] + '「' + value + '」');
+            return id;
+          },
+          conditions: text => condGroups(text, { strict: true }),
+        });
+        target().push({ type: 'gameplay', commands });
+        shop = null;
+        continue;
+      }
+      const shopHead = !settlement && shopStart.exec(line);
+      if (shopHead) { shop = { buyOnly: !!shopHead[1], lines: [] }; continue; }
       // #如果 条件 … #否则 … #结束
       const iff = /^[#＃]\s*(?:如果|条件)[\s:：]*(.+)$/.exec(line);
       if (iff && !/^[#＃]\s*(?:结束|条件结束|结束条件|endif)\s*$/i.test(line)) {
@@ -351,9 +440,10 @@ function createScript(project, opts = {}) {
         continue;
       }
       if (settlement) {
-        if (!/^[#＃]\s*(?:物品|变量|开关)/.test(line)) throw lineError('结算组可以写 #物品、#变量、#开关、#如果、#否则 和 #条件结束');
-        const action = parseOne(line);
-        if (action.type === 'say') throw lineError('指令写法有误，请写目标名称或编号及操作');
+        let action;
+        try { action = parseOne(line); } catch (error) { throw lineError(error.message); }
+        if (action.type === 'gameplay' && action.kind) { target().push({ ...action, line: i + 1 }); continue; }
+        if (!['item', 'var', 'switch'].includes(action.type)) throw lineError('结算组支持物品、装备、金币、队伍、恢复、经验、技能和变量开关，可配合条件分支');
         if (!action.id || (!allowMissingTargets && !exists(action.type, action.id))) throw lineError('找不到该物品、变量或开关');
         if (action.type === 'item' && (!Number.isSafeInteger(action.count) || action.count < 1)) throw lineError('物品数量要是正整数');
         if (action.type === 'var' && !Number.isSafeInteger(action.value)) throw lineError('变量值要在安全整数范围内');
@@ -362,8 +452,9 @@ function createScript(project, opts = {}) {
       }
       const ch = /^[#＃]\s*选项[\s:：]+(.+)$/.exec(line);
       if (ch) {
-        const labels = ch[1].split(/[|｜]/).map(x => x.trim()).filter(Boolean).slice(0, 6);
-        if (labels.length >= 2) { choice = { type: 'choice', labels, branches: labels.map(() => []) }; target().push(choice); continue; }
+        const labels = ch[1].trim().split(/^\d+(?:\s+\d+)+$/.test(ch[1].trim()) ? /\s+/ : /[|｜]/).map(x => x.trim()).filter(Boolean);
+        if (labels.length < 2 || labels.length > 6) throw lineError('请写 2～6 个选项，例如 #选项 1 2 3 或 #选项 买东西 | 离开');
+        choice = { type: 'choice', labels, branches: labels.map(() => []) }; target().push(choice); continue;
       }
       const br = /^[#＃](\d+)\s+(.+)$/.exec(line);
       if (br && choice && Number(br[1]) >= 1 && Number(br[1]) <= choice.labels.length) {
@@ -376,6 +467,7 @@ function createScript(project, opts = {}) {
       if (addMore(target(), line)) continue;
       target().push(parseOne(line));
     }
+    if (shop) throw new Error('「#商店」还差一个「#商店结束」');
     if (stack.length) throw new Error('「#如果」还差 ' + stack.length + ' 个「' + (settlement ? '#条件结束' : '#结束') + '」');
     return items;
   }
@@ -409,7 +501,7 @@ function createScript(project, opts = {}) {
         out.push({ code: 102, indent: 0, parameters: [it.labels.slice(), it.labels.length - 1, 0, 2, 1] });
         it.branches.forEach((br, idx) => {
           out.push({ code: 402, indent: 0, parameters: [idx, it.labels[idx]] });
-          for (const sub of scriptCommands(br)) out.push({ ...sub, indent: (sub.indent || 0) + 1 });
+          for (const sub of scriptCommands(br, o)) out.push({ ...sub, indent: (sub.indent || 0) + 1 });
           out.push({ code: 0, indent: 1, parameters: [] });
         });
         out.push({ code: 404, indent: 0, parameters: [] });
@@ -468,6 +560,8 @@ function createScript(project, opts = {}) {
   function stagingCommand(it) {
     const se = (name, volume) => ({ name, pan: 0, pitch: 100, volume });
     switch (it.type) {
+      case 'layeredCue': return [layeredCues.command(P, it.op)];
+      case 'gameplay': return it.commands;
       case 'fade': return [{ code: it.out ? 221 : 222, indent: 0, parameters: [] }];
       case 'bgm': return [it.stop ? { code: 242, indent: 0, parameters: [Math.max(0, Math.round(it.sec))] } : { code: 241, indent: 0, parameters: [se(it.name, it.volume)] }];
       case 'bgs': return [it.stop ? { code: 246, indent: 0, parameters: [Math.max(0, Math.round(it.sec))] } : { code: 245, indent: 0, parameters: [se(it.name, it.volume)] }];
@@ -494,6 +588,10 @@ function createScript(project, opts = {}) {
       }
       case 'transparent': return [{ code: 211, indent: 0, parameters: [it.on ? 0 : 1] }];
       case 'erase': return [{ code: 214, indent: 0, parameters: [] }];
+      case 'battle': {
+        if (!it.id || !P.has('troop', it.id)) throw new Error('找不到这个敌群：' + (it.ref || it.id || ''));
+        return [{ code: 301, indent: 0, parameters: [0, it.id, true, true] }];
+      }
       case 'title': return [{ code: 354, indent: 0, parameters: [] }];
       case 'plugin': return pa ? pa.commandsOf(it) : null;
       case 'camera': return [{ code: 204, indent: 0, parameters: [it.dir, Math.max(1, it.dist), it.speed, true] }];
@@ -503,9 +601,13 @@ function createScript(project, opts = {}) {
         if (!it.text) throw new Error('「#飘字」后面要写飘的字');
         return stageCommands('float', { who: it.who, text: it.text });
       }
+      case 'speech': {
+        if (!it.text || [...it.text].length > 120) throw new Error('文字气泡需在 1～120 字内');
+        return stageCommands('speech', { who: it.who, text: it.text });
+      }
       case 'act': {
-        if (!it.steps) throw new Error(`「#动作 ${it.who}」后面要写做什么（上 下 左 右、转身、跳、等0.5、！ …）`);
-        if (it.bad && it.bad.length) throw new Error(`「#动作」看不懂：${it.bad.join(' ')}（${STEP_HELP}；最后写「不等」= 不等他做完）`);
+        if (!it.steps) throw new Error(`「#移动 ${it.who}」后面要写做什么（上 下 左 右、转身、跳、等0.5、！ …）`);
+        if (it.bad && it.bad.length) throw new Error(`「#移动」看不懂：${it.bad.join(' ')}（${STEP_HELP}；最后写「不等」= 不等他做完）`);
         return stageCommands('act', { who: it.who, steps: it.steps, wait: it.wait ? 'true' : 'false' });
       }
       case 'as': {
@@ -543,7 +645,13 @@ function createScript(project, opts = {}) {
         if (!text || /[\r\n]/.test(text)) return '';
         return '#飘字 ' + (who ? who + '：' : '') + text;
       }
-      case 'act': return '#动作 ' + str('who') + ' ' + str('steps') + (str('wait') === 'false' ? ' 不等' : '');
+      case 'speech': return '#气泡 ' + (str('who') === '本事件' ? '' : str('who')) + '：' + str('text');
+      case 'act': {
+        const who = str('who'), steps = str('steps'), wait = str('wait') !== 'false';
+        if (wait && who === '本事件' && steps === '面向主角') return '#面向主角';
+        if (who && wait && !/^(主角|玩家|本事件|这个人)$/.test(who) && Object.hasOwn(stage.BALLOON_STEPS, steps)) return '#气泡 ' + steps + ' ' + who;
+        return '#移动 ' + who + ' ' + steps + (wait ? '' : ' 不等');
+      }
       case 'as': return '#扮演 ' + str('who') + (str('sheet') ? ' ' + str('sheet') + (Number(a.index) ? ' ' + Number(a.index) : '') : '');
       case 'transfer': {
         const id = Number(a.map), dir = Number(a.dir) || 0;
@@ -558,13 +666,19 @@ function createScript(project, opts = {}) {
     const out = [];
     const have = bustSlotOf(st.slots, it.who);
     let pos = it.pos;
-    if (!pos && have) pos = ({ [bustId('左')]: '左', [bustId('中')]: '中', [bustId('右')]: '右' })[have[0]] || '左';
+    if (!pos && have) {
+      const at = st.positions?.get(have[0]), placement = originalPlacement(have[1]);
+      pos = !it.fitted && placement && at && at[0] === placement.x && at[1] === placement.y ? '原位' :
+        ({ [bustId('左')]: '左', [bustId('中')]: '中', [bustId('右')]: '右' })[have[0]] || '左';
+    }
     if (!pos) {
       const busy = new Set([...st.slots.keys()].filter(isBustId));
-      pos = ['左', '右', '中'].find(k => !busy.has(bustId(k))) || '中';
+      const order = it.fitted ? ['右', '左', '中'] : ['左', '右', '中'];
+      pos = order.find(k => !busy.has(bustId(k))) || (it.fitted ? '右' : '中');
     }
-    if (have && have[0] !== bustId(pos)) { out.push({ code: 235, indent: 0, parameters: [have[0]] }); }
-    out.push({ code: 231, indent: 0, parameters: bustParams(it.who, it.face, pos) });
+    const params = bustParams(bustAsset(it, it.fitted ? BUST_SIDES[pos] : ''), pos);
+    if (have && have[0] !== params[0]) { out.push({ code: 235, indent: 0, parameters: [have[0]] }); }
+    out.push({ code: 231, indent: 0, parameters: params });
     return out;
   }
   function unbustCommands(it, st) {
@@ -595,6 +709,7 @@ function createScript(project, opts = {}) {
       }
       case 211: return '#透明 ' + (p[0] === 0 ? '开' : '关');
       case 214: return '#消失';
+      case 301: return p[0] === 0 && p[2] && p[3] && P.has('troop', p[1]) ? '#战斗 ' + refText('troop', p[1]) : '';
       case 354: return '#回到标题';
       case 204: return DIR_TEXT[p[0]] && p[3] ? '#镜头 ' + DIR_TEXT[p[0]] + ' ' + p[1] + (Number(p[2]) === 3 ? '' : ' ' + p[2]) : '';
       case 236: {
@@ -606,20 +721,35 @@ function createScript(project, opts = {}) {
         return '#天气 ' + t + (Number(p[1]) !== defPow || sec ? ' ' + p[1] : '') + (sec ? sec + '秒' : '') + (p[3] ? ' 等完' : '');
       }
       case 224: { const n = flashName(p[0]); return n && !p[2] ? '#闪光' + (n === '白' && Number(p[1]) === 30 ? '' : ' ' + n + (Number(p[1]) === 30 ? '' : ' ' + secText(p[1]))) : ''; }
-      case 356: return stageLine(c);
-      // 插件指令：演出插件（#飘字 #动作）优先，其它插件看参数表能不能把这一条写回来
+      case 355: {
+        const cue = layeredCues.read(c);
+        if (!cue) return '';
+        if (cue[0] === 'state') {
+          const actor = layered.resolveActor(P, cue[1]);
+          if (!actor || !layered.layoutsOf(P.sys())[actor.id]) return '#立绘 ' + cue[1];
+        }
+        return layeredCues.textOf(cue);
+      }
+      // 插件指令：演出插件（#飘字 #移动）优先，其它插件看参数表能不能把这一条写回来
+      case 356:
       case 357: return stageLine(c) || (pa ? pa.lineOf(c) : '');
       case 123: return ['A', 'B', 'C', 'D'].includes(p[0]) ? '#独立开关 ' + p[0] + ' ' + (p[1] === 0 ? '开' : '关') : '';
       case 322: { const a = (P.read('Actors.json') || [])[p[0]] || {}; return a.name && p[3] === (a.faceName || '') && p[4] === (a.faceIndex || 0) && p[5] === (a.battlerName || '') ? '#行走图 ' + refText('actor', p[0]) + ' ' + p[1] + (p[2] ? ' ' + p[2] : '') : ''; }
       case 231: {
         const b = parseBustName(p[1]);
         if (!b) return '';
-        const pos = posOfX(p[4]);
-        const want = bustParams(b.who, b.face, pos);
+        if (b.screen) {
+          const side = Object.keys(BUST_SIDES).find(pos => BUST_SIDES[pos] === b.screen);
+          return b.face === layered.faceDefault && b.action === 'still' && JSON.stringify(bustParams(p[1], side)) === JSON.stringify(p) ? '#立绘 ' + b.who : '';
+        }
+        const placement = originalPlacement(p[1]);
+        const pos = placement && p[4] === placement.x && p[5] === placement.y ? '原位' : posOfX(p[4]);
+        const want = bustParams(p[1], pos);
         if (JSON.stringify(want) !== JSON.stringify(p)) return '';
         const have = st && bustSlotOf(st.slots, b.who);
         // 写了位置的情况：这个人第一次出场、或者换了位置
-        return '#立绘 ' + b.who + ' ' + b.face + (!have || have[0] !== p[0] ? ' ' + pos : '');
+        const action = b.action && (b.action !== 'still' || picSize(bustName(b.who, b.face)).h) ? ' 动作=' + (layered.actions[b.action] || b.action) : '';
+        return '#立绘 ' + b.who + ' ' + b.face + (pos === '原位' || !have || have[0] !== p[0] ? ' ' + pos : '') + action;
       }
       case 235: {
         const nm = st && st.slots.get(p[0]);
@@ -630,7 +760,7 @@ function createScript(project, opts = {}) {
     return '';
   }
 
-  return { parseScript, scriptCommands, resolveRef, refText, exists, msgHead, stagingCommand, stagingLine, bustCommands, unbustCommands, isBustId, parseBustName, stageCommands, condParams };
+  return { parseScript, scriptCommands, resolveRef, refText, exists, msgHead, stagingCommand, stagingLine, gameplayLine: gameplay.lineOf, bustCommands, unbustCommands, isBustId, parseBustName, stageCommands, condParams, condGroups };
 }
 
 module.exports = { createScript, TINTS, BALLOONS, parseBustName, centerPad };

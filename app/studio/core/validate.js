@@ -1,4 +1,5 @@
 'use strict';
+const layered = require('./layered-portrait.js');
 // 保存前的检查（通用）：结构对不对、引用的东西在不在
 //   checkList(list) → [{ line, level:'error'|'warn', msg }]
 //   newProblems(before, after) → 保存后新出现的错误（原来就有的不拦，免得旧数据的问题让人什么都存不了）
@@ -7,6 +8,8 @@
 const OPENS_BODY = new Set([111, 112, 402, 403, 411, 601, 602, 603]);
 // 一层结束（缩进 +1 的结束标记 0）之后，下一条必须是这些之一
 const AFTER_BODY = new Set([402, 403, 404, 411, 412, 413, 602, 603, 604]);
+const { questOf, readQuestInstruction } = require('./quests.js');
+const catalog = ['item', 'weapon', 'armor'];
 
 // 台词一行在游戏里占多宽：汉字算 1，英文数字算 0.5；\N[1] 这类文字代码按换出来的样子大概算，颜色、图标代码不算
 function lineWidth(text) {
@@ -82,9 +85,33 @@ function createValidator(project) {
         case 117: if (!P.has('ce', p[0])) err(i, `调用的公共事件 ${p[0]} 不存在`); break;
         case 121: if (!P.has('switch', p[0]) || !P.has('switch', p[1])) err(i, `开关 ${p[0]} 超出范围（共 ${P.count('switch')} 个）`); break;
         case 122: if (!P.has('var', p[0]) || !P.has('var', p[1])) err(i, `变量 ${p[0]} 超出范围（共 ${P.count('var')} 个）`); break;
-        case 126: if (!P.has('item', p[0])) err(i, `物品 ${p[0]} 不存在`); break;
+        case 103: if (!P.has('var', p[0])) err(i, `输入数字的变量 ${p[0]} 不存在`); break;
+        case 126: case 127: case 128: {
+          const kind = catalog[c.code - 126];
+          if (!P.has(kind, p[0])) err(i, P.label(kind, p[0]) + ' 不存在');
+          break;
+        }
+        case 302: case 605:
+          if (!catalog[p[0]] || !P.has(catalog[p[0]], p[1])) err(i, `商店商品 ${p[1]} 不存在`);
+          break;
+        case 129: if (!P.has('actor', p[0])) err(i, `角色 ${p[0]} 不存在`); break;
+        case 318: if (!P.has('skill', p[3])) err(i, `技能 ${p[3]} 不存在`); break;
+        case 356: case 357: {
+          const action = readQuestInstruction(c);
+          if (!action) break;
+          const quest = questOf(P.sys(), String(action.id));
+          if (!quest) err(i, `任务 ${action.id} 不存在`);
+          else if (action.action === '推进' && (!Number.isInteger(action.step) || action.step < 2 || action.step > quest.steps.length)) err(i, '任务步骤不在范围内');
+          break;
+        }
         case 201: if (p[0] === 0 && !P.has('map', p[1])) err(i, `传送的目标地图 ${p[1]} 不存在`); break;
-        case 231: if (opts.images !== false && p[1] && !P.findImage('pictures', p[1])) err(i, `图片「${p[1]}」不存在（img/pictures）`); break;
+        case 231: {
+          if (opts.images === false || !p[1]) break;
+          const tag = layered.readPicture(p[1]);
+          if (tag && !layered.forPicture(P, p[1])) err(i, `找不到「${tag.who}」的分层立绘表情「${tag.face}」`);
+          if (!tag && !P.findImage('pictures', p[1])) err(i, `图片「${p[1]}」不存在（img/pictures）`);
+          break;
+        }
         case 111:
           if (p[0] === 0 && !P.has('switch', p[1])) err(i, `条件里的开关 ${p[1]} 超出范围`);
           if (p[0] === 1 && !P.has('var', p[1])) err(i, `条件里的变量 ${p[1]} 超出范围`);

@@ -61,7 +61,8 @@ async function showSheetChar(sub, name, index, canWrite, onDeleted) {
     <button class="quiet small sideclose" id="sideX">关闭</button>
     <h2>${esc(name)}${big ? '' : ` · 第 ${index + 1} 个`}</h2>
     <div class="pbig side">${sub === 'faces' ? '<span class="pdir" data-dir="2"></span>' : ['2', '4', '6', '8'].map(d => `<span class="pdir" data-dir="${d}"></span>`).join('')}</div>
-    ${canWrite ? `<div class="edbar"><button class="small" id="scReplace">替换成上传的图</button>${sub === 'characters' ? '<button class="small" id="scAdjust">调整</button>' : ''}
+    ${r.diagonal ? `<div class="pbig side">${[[2, '左下'], [4, '右下'], [6, '左上'], [8, '右上']].map(([dir, label]) => `<span class="pdir" data-diagonal="${dir}" title="${label}"></span>`).join('')}</div>` : ''}
+    ${canWrite ? `<div class="edbar"><button class="small" id="scReplace">替换成上传的图</button>${sub === 'characters' ? '<button class="small" id="scAdjust">调整</button><button class="small" id="scDiagonal">斜向站姿</button>' : ''}
       ${r.canDelete ? `<button class="small danger" id="scDelete" ${r.sheetRefs.length ? 'disabled' : ''}>删除整张图</button>` : ''}</div>` : ''}
     ${canWrite && r.canDelete && r.sheetRefs.length ? '<div class="fnote">这张图仍在使用，请先更换下方引用的图像。</div>' : ''}
     ${canWrite && r.canDelete === false ? '<div class="fnote">这张图位于当前工程的可删除目录之外。</div>' : ''}
@@ -69,10 +70,15 @@ async function showSheetChar(sub, name, index, canWrite, onDeleted) {
     ${r.refs.map(refLink).join('')}
     ${otherRefs.length ? `<div class="dim" style="margin-top:10px">同一张图的其他位置用在 ${otherRefs.length} 处</div>${otherRefs.map(refLink).join('')}` : ''}
   </div>`;
-  $$('.pdir', side).forEach(el => mountSprite(el, name, index, Number(el.dataset.dir), sub === 'faces' ? 120 : 56, sub !== 'faces', sub));
+  $$('[data-dir]', side).forEach(el => mountSprite(el, name, index, Number(el.dataset.dir), sub === 'faces' ? 120 : 56, sub !== 'faces', sub));
+  $$('[data-diagonal]', side).forEach(el => mountSprite(el, r.diagonal, index, Number(el.dataset.diagonal), 56, false, sub));
   $('#sideX').onclick = closeSide;
   if ($('#scReplace')) $('#scReplace').onclick = () => uploadDialog(sub, { name, index, big });
   if ($('#scAdjust')) $('#scAdjust').onclick = () => adjustDialog(name, index);
+  if ($('#scDiagonal')) $('#scDiagonal').onclick = async () => {
+    try { if (await diagonalSheetDialog(name, r.diagonal) && S.side === selection) await showSheetChar(sub, name, index, canWrite, onDeleted); }
+    catch (e) { toast(e.message, true); }
+  };
   const remove = $('#scDelete', side);
   if (remove) remove.onclick = async () => {
     remove.disabled = true;

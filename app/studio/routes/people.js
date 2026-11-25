@@ -5,6 +5,7 @@
 const { need, int, UserError } = require('../lib/util.js');
 const { writeLinks } = require('../core/people.js');
 const { parsePassive, changeRule } = require('../core/variable-rules.js');
+const directions = require('../core/directions.js');
 const fs = require('fs');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
@@ -97,11 +98,18 @@ module.exports = function (ctx) {
         const sub = q('sub') === 'faces' ? 'faces' : 'characters';
         const name = String(q('name') || ''), index = int(q('index') || 0);
         const all = T.xref.sheetRefs(sub, name).map(r => ({ ...r, where: where(r.at) }));
+        const diagonal = directions.sheets(project.sys());
         return { refs: all.filter(r => Number(r.id.slice(r.id.lastIndexOf('#') + 1)) === index), sheetRefs: all,
+          diagonal: sub === 'characters' && Object.hasOwn(diagonal, name) ? diagonal[name] : '',
           canDelete: !opts.readOnly && !!V.sheetFiles(sub, name).length };
       },
     },
     post: {
+    'sheet/diagonal'(T, b) {
+      const name = String(b.name || ''), other = String(b.sheet || '');
+      T.store.edit(['System.json'], docs => directions.setSheet(ctx, docs['System.json'], name, other));
+      return {};
+    },
     'actor/update'(T, b) {
       const id = int(b.id, '角色编号不对');
       T.store.edit(b.enableSideView ? ['Actors.json', 'System.json'] : ['Actors.json'], docs => {

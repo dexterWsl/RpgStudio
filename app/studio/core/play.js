@@ -9,6 +9,9 @@ const choicecond = require('./choicecond.js');
 const stage = require('./stage.js');
 const { isMarked } = require('./scenes.js');
 const { isSettlement } = require('./settlements.js');
+const { readQuestInstruction } = require('./quests.js');
+const layered = require('./layered-portrait.js');
+const layeredCues = require('./layered-cues.js');
 
 function createPlayer(project, describer) {
   const P = project;
@@ -92,7 +95,12 @@ function createPlayer(project, describer) {
         }
         case 231: {
           const direct = p[3] === 0;
-          out.push({ t: 'pic', id: p[0], name: String(p[1] || ''), origin: p[2] || 0, x: direct ? p[4] : 0, y: direct ? p[5] : 0, sx: p[6] == null ? 100 : p[6], sy: p[7] == null ? 100 : p[7], op: p[8] == null ? 255 : p[8], missing: !!p[1] && !P.findImage('pictures', p[1]) });
+          const portrait = layered.forPicture(P, p[1]);
+          let fit;
+          if (portrait?.screen) { const size = screen(); fit = layered.stagePose(portrait.layout, portrait.screen, size.w, size.h); }
+          out.push({ t: 'pic', id: p[0], name: portrait ? `${portrait.who} · ${portrait.face}` : String(p[1] || ''), origin: p[2] || 0,
+            x: fit ? fit.x : direct ? p[4] : 0, y: fit ? fit.y : direct ? p[5] : 0, sx: fit ? fit.scale * 100 : p[6] ?? 100, sy: fit ? fit.scale * 100 : p[7] ?? 100,
+            op: p[8] ?? 255, missing: !!p[1] && !portrait && !P.findImage('pictures', p[1]), ...(portrait && { portrait }) });
           break;
         }
         case 232: {
@@ -118,9 +126,16 @@ function createPlayer(project, describer) {
           if (inner.length) out.push({ t: 'call', id: p[0], name: String(ce.name || ''), steps: inner });
           break;
         }
+        case 355: {
+          const cue = layeredCues.read(c);
+          if (cue && list[i + 1]?.code !== 655) out.push({ t: 'layeredCue', cue, text: layeredCues.textOf(cue) });
+          break;
+        }
         // 编辑器自己的演出插件（飘字、动作、扮演、带人的传送）：提一句；别的插件看认不认识
-        case 356: if (stage.isStageCmd(c)) out.push({ t: 'note', text: describer.describe(c) }); break;
-        case 357: if (stage.isStageCmd(c)) out.push({ t: 'note', text: describer.describe(c) }); else out.push(...pluginSteps(p)); break;
+        case 356: case 357:
+          if (stage.isStageCmd(c) || readQuestInstruction(c)) out.push({ t: 'note', text: describer.describe(c) });
+          else if (c.code === 357) out.push(...pluginSteps(p));
+          break;
         case 125: case 126: case 127: case 128: { const g = codes.gainOf(c); if (g) ctx.gain = g; break; }
         default: break;
       }

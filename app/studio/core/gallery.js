@@ -15,19 +15,20 @@ const GALLERY_NAME = /回想|图鉴|圖鑑|画廊|鑑賞|鉴赏|gallery|recollec
 const CANCEL = /^(算了|取消|退出|返回|关闭|不看了|没事|不要|下次再说|nevermind|never mind|cancel|no|back|exit|quit|return|leave)[。.!！]?$/i;
 const choicecond = require('./choicecond.js');
 // 复制到回想房时去掉的：传送、打开存档 / 游戏结束 / 回标题、暂时消除事件（会把入口消掉）
-const DROP = new Set([201, 352, 353, 354, 214]);
+const DROP = new Set([201, 214, 302, 352, 353, 354]);
 // 指向某个事件的指令：原地图上的第 N 号事件在回想房里不存在（或者是别的东西），这几条去掉；玩家（-1）和「本事件」（0）留着
 const TARGETS = new Set([203, 205, 212, 213]);
 const TAG_RE = /<RpgStudioRecall:([^>]*)>/i;
 const SNAP = [
   '// 回想：记下现在的开关、变量、物品，播完恢复（不影响存档进度）',
-  '$gameTemp._rpgStudioRecall = [JSON.stringify($gameSwitches._data), JSON.stringify($gameVariables._data), JSON.stringify($gameSelfSwitches._data), JSON.stringify([$gameParty._items, $gameParty._weapons, $gameParty._armors, $gameParty._gold])];',
+  '$gameTemp._rpgStudioRecall = [JSON.stringify($gameSwitches._data), JSON.stringify($gameVariables._data), JSON.stringify($gameSelfSwitches._data), JSON.stringify([$gameParty._items, $gameParty._weapons, $gameParty._armors, $gameParty._gold]), JsonEx.stringify([$gameParty._actors, $gameActors._data])];',
 ];
 const RESTORE = [
   '// 回想：恢复播之前的开关、变量、物品',
   'var r = $gameTemp._rpgStudioRecall;',
   'if (r) { $gameSwitches._data = JSON.parse(r[0]); $gameVariables._data = JSON.parse(r[1]); $gameSelfSwitches._data = JSON.parse(r[2]);',
   '  var p = JSON.parse(r[3]); $gameParty._items = p[0]; $gameParty._weapons = p[1]; $gameParty._armors = p[2]; $gameParty._gold = p[3];',
+  '  if (r[4]) { var actors = JsonEx.parse(r[4]); $gameParty._actors = actors[0]; $gameActors._data = actors[1]; $gamePlayer.refresh(); }',
   '  $gameTemp._rpgStudioRecall = null; $gameMap.requestRefresh(); }',
 ];
 const script = (lines, indent) => lines.map((t, i) => ({ code: i ? 655 : 355, indent, parameters: [t] }));
@@ -255,6 +256,7 @@ function createGallery(project, xref, opts = {}) {
       if (drop) {
         removed[c.code] = (removed[c.code] || 0) + 1;
         if (c.code === 205) while (i + 1 < list.length && list[i + 1].code === 505) i++;   // 移动路线的续行一起去掉
+        if (c.code === 302) while (i + 1 < list.length && list[i + 1].code === 605) i++;
         continue;
       }
       out.push(c);

@@ -10,6 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const mapEffects = require('./map-effects.js');
 const variableRules = require('./variable-rules.js');
+const layered = require('./layered-portrait.js');
+const overlayPlugins = [require('./quests.js'), require('./world-time.js'), require('./map-enemies.js'), require('./shop.js'), require('./directions.js'), require('./stage.js'), layered, require('./animated-portrait.js')];
 
 const PLUGIN = 'RpgStudio_Playtest';
 const MIME = {
@@ -77,9 +79,15 @@ function createPlaytest(o) {
     const workDataDir = o.workDataDir && o.workDataDir();
     if (workDataDir && rel === mapEffects.PLUGIN_FILE) return send(200, MIME['.js'], fs.readFileSync(mapEffects.SOURCE, 'utf8'));
     if (workDataDir && rel === variableRules.PLUGIN_FILE) return send(200, MIME['.js'], fs.readFileSync(variableRules.SOURCE, 'utf8'));
+    const overlay = workDataDir && overlayPlugins.find(plugin => plugin.PLUGIN_FILE === rel);
+    if (overlay) return send(200, MIME['.js'], overlay.pluginSource ? overlay.pluginSource() : fs.readFileSync(overlay.SOURCE, 'utf8'));
     const workFile = workDataDir && /^data\/([\w]+\.json)$/.exec(rel);
-    const base = workFile ? workDataDir : root;
-    const file = path.resolve(base, workFile ? workFile[1] : rel);
+    const parts = o.uploadRoot && o.uploadRoot();
+    const partPath = rel.split('/');
+    const uploaded = parts && partPath.length === 3 && partPath[0] === 'img' && partPath[1] === layered.partSub &&
+      path.extname(partPath[2]) === '.png' && layered.PART_ID.test(path.basename(partPath[2], '.png')) && fs.existsSync(path.join(parts, rel.slice(4)));
+    const base = path.resolve(workFile ? workDataDir : uploaded ? parts : root);
+    const file = path.resolve(base, workFile ? workFile[1] : uploaded ? rel.slice(4) : rel);
     if (!file.startsWith(base + path.sep) || /(^|[\\/])(save|backups?|\.git)([\\/]|$)/i.test(path.relative(base, file))) return send(404, 'text/plain; charset=utf-8', '没有这个文件');
     let st;
     try { st = fs.statSync(file); } catch { return send(404, 'text/plain; charset=utf-8', '没有这个文件：' + rel); }
@@ -90,9 +98,13 @@ function createPlaytest(o) {
       let src = fs.readFileSync(file, 'utf8');
       if (workDataDir) src += `\nif (!$plugins.some(p => p && p.name === "${mapEffects.PLUGIN}" && p.status)) $plugins.push({ name: "${mapEffects.PLUGIN}", status: true, description: "rpgStudio 地图效果", parameters: {} });\n`;
       if (workDataDir && o.system) {
-        const rules = variableRules.rulesOf(o.system());
+        const system = o.system();
+        const rules = variableRules.rulesOf(system);
         if (Object.keys(rules.passive).length || Object.keys(rules.groups).length) {
           src += `\nif (!$plugins.some(p => p && p.name === "${variableRules.ENTRY.name}" && p.status)) $plugins.push(${JSON.stringify(variableRules.ENTRY)});\n`;
+        }
+        for (const plugin of overlayPlugins.filter(p => p.used(system))) {
+          src += `\n$plugins = $plugins.filter(p => !p || p.name !== ${JSON.stringify(plugin.ENTRY.name)}); $plugins.push(${JSON.stringify(plugin.ENTRY)});\n`;
         }
       }
       return send(200, type, src + `\n$plugins.push({ name: "${PLUGIN}", status: true, description: "rpgStudio 试玩", parameters: {} });\n`);

@@ -41,7 +41,7 @@ module.exports = function (ctx) {
     }
     return pages;
   }
-  const freeId = m => { let id = m.events.findIndex((e, i) => i > 0 && !e); return id < 0 ? Math.max(1, m.events.length) : id; };
+  const freeId = Maps.freeEventId;
   const busy = m => new Set((m.events || []).filter(Boolean).map(e => e.x + ',' + e.y));
   // 放看不见的事件（闲聊）的格子：优先走不过去的地方（墙、桌子），不占路
   function freeSpot(m, taken) {

@@ -18,14 +18,17 @@ const BLK_DIR = { 2: '下', 4: '左', 6: '右', 8: '上' };
 const BLK_CAT = {
   传送: 'tp', 扮演: 'tp', 场景: 'scene',
   变量: 'state', 开关: 'state', 物品: 'state', 独立开关: 'state', 结算: 'state',
+  金币: 'state', 金钱: 'state', 武器: 'state', 防具: 'state', 队伍: 'state', 恢复: 'state', 经验: 'state', 技能: 'state', 任务: 'state', 输入数字: 'state', 商店: 'state',
   图: 'stage', CG: 'stage', cg: 'stage', 显示图片: 'stage', 清图: 'stage', 清除图片: 'stage', 关闭图片: 'stage', 关图: 'stage', 不要图: 'stage', 立绘: 'stage', 退场: 'stage', 字幕: 'stage',
-  飘字: 'move', 动作: 'move', 行走图: 'move', 透明: 'move', 气泡: 'move', 消失: 'move',
+  飘字: 'move', 移动: 'move', 动作: 'move', 行走图: 'move', 透明: 'move', 气泡: 'move', 消失: 'move',
   音乐: 'sound', 停音乐: 'sound', 环境音: 'sound', 停环境音: 'sound', 音效: 'sound',
   等待: 'screen', 淡出: 'screen', 淡入: 'screen', 色调: 'screen', 震动: 'screen', 闪光: 'screen', 天气: 'screen', 镜头: 'screen', 回到标题: 'screen',
   插件: 'code', 原样: 'keep',
 };
 const BLK_CONTAINER = new Set(['branch', 'if', 'else', 'cancel', 'loop', 'nif', 'nelse', 'khead']);
 const BLK_MOVABLE = new Set(['say', 'cmd', 'keep', 'blank']);
+const BLK_SHOP_HEAD = /^[#＃]\s*商店(?:\s+只买)?\s*$/;
+const BLK_SHOP_END = /^[#＃]\s*(?:商店结束|结束商店|结束)\s*$/;
 
 function blkKind(s) {
   if (!String(s).trim()) return 'blank';
@@ -58,7 +61,7 @@ const blkStrip = s => String(s).replace(/<<\[[\s\S]*?\]>>|\(\(\[[\s\S]*?\]\)\)/g
 
 function mountBlocks(host, ed) {
   let lines = [], rows = [], sel = -1;
-  const folded = new Set(), condOpen = new Set();
+  const folded = new Set(), condOpen = new Set(), seenShops = new Set();
   const history = [];
   let typing = -1;                 // 正在打字的那一行（连着打的字算一步撤销）
   let actors = [];
@@ -68,19 +71,22 @@ function mountBlocks(host, ed) {
   // ---------- 拆行 ----------
   function analyze() {
     const out = [], seen = new Map();
-    let ifDepth = 0, choice = null;
+    let ifDepth = 0, choice = null, shop = null;
     lines.forEach((raw, i) => {
       const m = /^((?:│ ?)*)(.*)$/.exec(raw);
       const r = { i, raw, bars: (m[1].match(/│/g) || []).length, body: m[2], k: 0, inner: m[2] };
       const km = /^[#＃]([1-6])(?:\s+([\s\S]*))?$/.exec(r.body);
       if (km && choice && Number(km[1]) <= choice.labels.length) { r.k = Number(km[1]); r.inner = (km[2] || '').trim(); }
       r.kind = r.k && !r.inner ? 'khead' : blkKind(r.inner);
+      if (shop) r.kind = 'shopline';
+      else if (!r.k && BLK_SHOP_HEAD.test(r.inner)) r.kind = 'shop';
       if (r.kind === 'nend') ifDepth = Math.max(0, ifDepth - 1);
       r.v = r.bars + ifDepth - (r.kind === 'nelse' ? 1 : 0);
       if (r.k) r.v = choice.v + (r.kind === 'khead' ? 0 : 1);
       if (r.kind === 'nif') ifDepth++;
       if (r.kind === 'choice') {
-        choice = { i, v: r.v, labels: r.inner.replace(/^[#＃]\s*选项[\s:：]+/, '').split(/[|｜]/).map(x => x.trim()).filter(Boolean).slice(0, 6) };
+        const source = r.inner.replace(/^[#＃]\s*选项[\s:：]+/, '').trim();
+        choice = { i, v: r.v, labels: source.split(/^\d+(?:\s+\d+)+$/.test(source) ? /\s+/ : /[|｜]/).map(x => x.trim()).filter(Boolean).slice(0, 6) };
         r.labels = choice.labels;
       }
       if (r.k) { r.choice = choice.i; r.label = choice.labels[r.k - 1] || ''; }
@@ -88,6 +94,16 @@ function mountBlocks(host, ed) {
       const n = seen.get(key) || 0;
       seen.set(key, n + 1);
       r.key = key + '\u0001' + n;
+      if (shop) {
+        r.shop = shop;
+        r.v = shop.v + 1;
+        shop.end = i + 1;
+        if (BLK_SHOP_END.test(r.inner)) shop = null;
+      } else if (r.kind === 'shop') {
+        shop = r;
+        r.end = i + 1;
+        if (!seenShops.has(r.key)) { seenShops.add(r.key); folded.add(r.key); }
+      }
       out.push(r);
     });
     // 容器（选项 / 如果 …）管到下一个层次不比它深的行；空行看它后面那一行
@@ -219,6 +235,10 @@ function mountBlocks(host, ed) {
         const c = chip(s);
         return `<div class="${cls}" ${at}><button type="button" class="chip c-${c.cat}" data-act="chip" title="点开看 / 改">${c.html}</button>${tools(r, { raw: true })}</div>`;
       }
+      case 'shop':
+        return `<div class="${cls}" ${at}>${fold(r)}<span class="bk-tag t-choice">商店</span><button type="button" class="small" data-act="shop-edit">改商品</button>${tools(r, { delTitle: '删掉整个商店' })}</div>`;
+      case 'shopline':
+        return `<div class="${cls}" ${at}><span class="bk-static">${esc(s)}</span></div>`;
       case 'keep':
         return `<div class="${cls}" ${at}><button type="button" class="chip c-keep" data-act="keep" title="编辑框表达不了的指令：能删、能挪，不能改">${esc(s.replace(/^[#＃]\s*原样\s*/, '原样 '))}</button>${tools(r)}</div>`;
       case 'chead': {
@@ -305,6 +325,7 @@ function mountBlocks(host, ed) {
   function insertPoint() {
     if (sel < 0 || !rows[sel]) return { at: lines.length, bars: 0, k: 0 };
     const r = rows[sel];
+    if (r.kind === 'shop' || r.shop) { const shop = r.shop || r; return { at: shop.end, bars: shop.bars, k: 0 }; }
     if (['branch', 'if', 'else', 'cancel', 'loop'].includes(r.kind)) return { at: r.i + 1, bars: r.bars + 1, k: 0 };
     if (['nif', 'nelse'].includes(r.kind)) return { at: r.i + 1, bars: r.bars, k: 0 };
     if (r.kind === 'khead') return { at: r.end, bars: r.bars, k: r.k };
@@ -316,6 +337,7 @@ function mountBlocks(host, ed) {
   function insert(text) {
     const add = String(text).split('\n');
     const p = insertPoint();
+    if (p.k && BLK_SHOP_HEAD.test(add[0])) { toast('在场景里写商店，再从这个选项插入场景', true); return; }
     if (p.k && add.some(l => /^[#＃]\s*(?:选项|如果|条件)[\s:：]/.test(l))) { toast('新写的选项里面不能再套选项 / 条件；先保存，再往里加', true); return; }
     const next = [...lines];
     // 文字最后是空行、又插在最后：插在空行前面
@@ -375,6 +397,7 @@ function mountBlocks(host, ed) {
   }
   async function del(i) {
     const r = rows[i];
+    if (r.kind === 'shop') return removeRange(i, r.end);
     if (r.kind === 'choice') {
       let j = i + 1;
       while (j < rows.length && rows[j].k && rows[j].choice === i) j++;
@@ -533,6 +556,20 @@ function mountBlocks(host, ed) {
     if (act === 'fold') { if (folded.has(r.key)) folded.delete(r.key); else folded.add(r.key); draw(); return; }
     if (act === 'up' || act === 'down') return move(i, act === 'up' ? -1 : 1);
     if (act === 'del') return del(i);
+    if (act === 'shop-edit') {
+      const source = rows.slice(i, r.end).map(line => line.inner).join('\n');
+      const result = await openDialog(`<header><h3>改商品</h3><button class="quiet small" type="button" data-x>关闭</button></header>
+        <div class="dbody"><textarea class="settlement-source" aria-label="商店写法" rows="9">${esc(source)}</textarea></div>
+        <footer><span class="sp"></span><button type="button" data-x>取消</button><button type="button" class="primary" data-ok>应用</button></footer>`, (d, done) => {
+        $$('[data-x]', d).forEach(button => button.onclick = () => done(null));
+        $('[data-ok]', d).onclick = () => done($('textarea', d).value);
+      });
+      if (result === null || result === undefined) return;
+      const next = [...lines];
+      next.splice(i, r.end - i, ...result.split(/\r?\n/).map(line => '│ '.repeat(r.bars) + line));
+      commit(next, i);
+      return;
+    }
     if (act === 'raw') return rawEdit(i);
     if (act === 'chip') return editChip(i, b);
     if (act === 'keep') { toast('编辑框表达不了的指令：能删、能挪，不能改（要改去 RPG Maker 里）'); return; }
