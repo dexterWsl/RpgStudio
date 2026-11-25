@@ -6,6 +6,7 @@
 //   outline(list)        一页指令 → 阅读用的行（对话框和续行合并成一行）
 //   category(code)       分类（界面上按颜色区分）
 
+const { termsOf: pageTerms } = require('./page-conditions.js');
 const VAR_OPS = ['=', '+=', '−=', '×=', '÷=', '%='];
 const CMP = ['=', '≥', '≤', '>', '<', '≠'];
 const DIRS = { 0: '保持', 2: '下', 4: '左', 6: '右', 8: '上' };
@@ -316,15 +317,16 @@ function createDescriber(project, opts = {}) {
 
   // 事件页的出现条件 → 一组短句；没有条件 = 一直出现
   function pageConditions(cd) {
-    cd = cd || {};
-    const out = [];
-    if (cd.switch1Valid) out.push(`${L('switch', cd.switch1Id)} 为开`);
-    if (cd.switch2Valid) out.push(`${L('switch', cd.switch2Id)} 为开`);
-    if (cd.variableValid) out.push(`${L('var', cd.variableId)} ≥ ${cd.variableValue}`);
-    if (cd.selfSwitchValid) out.push(`独立开关 ${cd.selfSwitchCh} 为开`);
-    if (cd.itemValid) out.push(`持有 ${L('item', cd.itemId)}`);
-    if (cd.actorValid) out.push(`${L('actor', cd.actorId)} 在队伍中`);
-    return out;
+    return pageTerms(cd).map(t => {
+      switch (t.kind) {
+        case 'switch': return `${L(t.kind, t.id)} 为开`;
+        case 'var': return `${L(t.kind, t.id)} ≥ ${t.value}`;
+        case 'selfSwitch': return `独立开关 ${t.channel} 为开`;
+        case 'item': return `持有 ${L(t.kind, t.id)}`;
+        case 'actor': return `${L(t.kind, t.id)} 在队伍中`;
+        default: return '';
+      }
+    }).filter(Boolean);
   }
 
   // 这一条指令引用了哪些东西（界面上点了能看「在哪里用到」）

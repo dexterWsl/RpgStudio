@@ -9,6 +9,7 @@ const marks = require('../core/marks.js');
 const { isSettlement } = require('../core/settlements.js');
 const { freeEventId } = require('../core/maps.js');
 const { interactionList } = require('../core/npc.js');
+const conditions = require('../core/page-conditions.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -32,7 +33,8 @@ module.exports = function (ctx) {
     // 这个事件自己的独立开关：哪里开、哪里判断
     const self = {};
     e.pages.forEach((pg, pi) => {
-      if (pg.conditions.selfSwitchValid) (self[pg.conditions.selfSwitchCh] = self[pg.conditions.selfSwitchCh] || []).push({ page: pi, use: 'check', text: '出现条件' });
+      const channels = new Set(conditions.termsOf(pg.conditions).filter(t => t.kind === 'selfSwitch').map(t => t.channel));
+      for (const ch of channels) (self[ch] = self[ch] || []).push({ page: pi, use: 'check', text: '出现条件' });
       (pg.list || []).forEach((c, i) => {
         if (c.code === 123) (self[c.parameters[0]] = self[c.parameters[0]] || []).push({ page: pi, line: i, use: 'set', text: T.describer.describe(c) });
         if (c.code === 111 && c.parameters[0] === 2) (self[c.parameters[1]] = self[c.parameters[1]] || []).push({ page: pi, line: i, use: 'check', text: T.describer.describe(c) });
@@ -47,6 +49,7 @@ module.exports = function (ctx) {
       pages: e.pages.map((pg, pi) => pageView(T, pg.list || [], {
         index: pi,
         conditions: pg.conditions,
+        supportsExtraConditions: true,
         conditionText: T.describer.pageConditions(pg.conditions),
         trigger: pg.trigger, triggerText: TRIGGERS[pg.trigger] || '',
         priorityType: pg.priorityType, priorityText: PRIORITIES[pg.priorityType] || '',
@@ -111,8 +114,8 @@ module.exports = function (ctx) {
     });
   }
 
-  function checkConditions(cd) {
-    const out = blankPage().conditions;
+  function checkConditions(cd, previous) {
+    const out = { ...blankPage().conditions, ...previous };
     const b = v => !!v;
     out.switch1Valid = b(cd.switch1Valid); out.switch1Id = int(cd.switch1Id || 1);
     out.switch2Valid = b(cd.switch2Valid); out.switch2Id = int(cd.switch2Id || 1);
@@ -126,6 +129,7 @@ module.exports = function (ctx) {
     need(['A', 'B', 'C', 'D'].includes(out.selfSwitchCh), '独立开关只能是 A/B/C/D');
     if (out.itemValid) need(project.has('item', out.itemId), '物品 ' + out.itemId + ' 不存在');
     if (out.actorValid) need(project.has('actor', out.actorId), '角色 ' + out.actorId + ' 不存在');
+    if (Object.hasOwn(cd, conditions.KEY)) conditions.setExtra(out, conditions.checkExtra(cd[conditions.KEY], project));
     return out;
   }
 
@@ -408,7 +412,7 @@ module.exports = function (ctx) {
         const e = (docs[project.mapFile(mapId)] || {}).events[evId];
         need(e && e.pages[page], '这一页不存在');
         const pg = e.pages[page];
-        if (b.conditions) pg.conditions = checkConditions(b.conditions);
+        if (b.conditions) pg.conditions = checkConditions(b.conditions, pg.conditions);
         if (b.trigger != null) { const t = int(b.trigger); need(t >= 0 && t <= 4, '触发方式不对'); pg.trigger = t; }
         if (b.priorityType != null) { const t = int(b.priorityType); need(t >= 0 && t <= 2, '优先级不对'); pg.priorityType = t; }
         if (b.image) pg.image = checkImage(b.image, pg.image);

@@ -619,6 +619,7 @@ dialog footer{display:flex;align-items:center;gap:8px;padding:12px 18px;border-t
 .frow .ins{display:flex;gap:6px;align-items:center;min-width:0}
 .frow .ins select,.frow .ins input{min-width:0;flex:1}
 .frow .ins input.n{flex:0 0 90px}
+.page-extra-conditions{display:contents}
 .fgrid{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px 12px;align-items:center}
 .settlement-list{display:grid;gap:12px;margin-top:14px}
 .settlement-card{padding:14px 16px;display:grid;gap:8px}

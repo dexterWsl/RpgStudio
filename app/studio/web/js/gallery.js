@@ -24,7 +24,7 @@ function unlockText(e) {
     if (good.length) parts.push(`<span>${ch.length > 1 ? '每段各自解锁' : '这段要'}：${good.map(ref).join('、')}，正常玩会打开</span>`);
     if (bad.length) parts.push(`<span class="warnt">${bad.map(ref).join('、')} 正常玩没有地方打开${bad.some(s => s.roomSet) ? '（只有回想房里的「全解锁」会打开）' : ''}</span>`);
   }
-  if (u.variable) parts.push(`<span>变量 ${u.variable.id}「${esc(u.variable.name || '')}」≥ ${u.variable.value}</span>`);
+  for (const v of u.variables || (u.variable ? [u.variable] : [])) parts.push(`<span>变量 ${v.id}「${esc(v.name || '')}」≥ ${v.value}</span>`);
   for (const o of u.other) parts.push(`<span>${esc(o)}</span>`);
   return parts.length ? parts.join('') : '<span class="okt">一开始就能看</span>';
 }

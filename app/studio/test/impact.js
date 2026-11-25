@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { createDescriber } = require('../core/commands.js');
 const { createXref } = require('../core/xref.js');
 const { outcome } = require('../core/impact.js');
+const { KEY } = require('../core/page-conditions.js');
 
 const command = (code, parameters = [], indent = 0) => ({ code, indent, parameters });
 const commands = [
@@ -29,12 +30,22 @@ const db = {
   'CommonEvents.json': [null, { id: 1, trigger: 1, switchId: 1, list: [command(401, ['门已打开'])] }],
   'Troops.json': [null, { id: 1, pages: [{ conditions: { switchValid: true, switchId: 1, turnValid: true }, list: [] }] }],
 };
+const extraPage = {
+  conditions: {
+    variableValid: true, variableId: 1, variableValue: 10,
+    [KEY]: [{ kind: 'var', id: 2, value: 4 }, { kind: 'var', id: 3, value: 2 }],
+  },
+  trigger: 0, list: [command(0)],
+};
 const project = {
   KIND_LABEL: { var: '变量', switch: '开关' },
   label: (kind, id) => `${kind} ${id}`, name: () => '', expandN: text => text,
   read: file => db[file] || [], count: () => 600,
   mapList: () => [{ id: 1 }],
-  map: () => ({ events: [null, { id: 1, pages: [{ conditions: { variableValid: true, variableId: 1, variableValue: 10 }, trigger: 3, list: commands }] }] }),
+  map: () => ({ events: [null, { id: 1, pages: [
+    { conditions: { variableValid: true, variableId: 1, variableValue: 10 }, trigger: 3, list: commands },
+    extraPage,
+  ] }] }),
   memoize: (_, build) => build(),
 };
 const xref = createXref(project, createDescriber(project));
@@ -53,6 +64,10 @@ assert.equal(check(branch, 'sub', 2).leave, true);
 assert.equal(check(branch, 'set', 10).enter, true);
 assert.equal(check(branch, 'set', 9).leave, true);
 assert.equal(check(vars.find(r => r.rule?.type === 'page'), 'add', 1, 9).enter, true);
+const extraVar = xref.of('var', 3).find(r => r.at.type === 'map' && r.at.page === 1 && r.rule?.type === 'page');
+assert.equal(extraVar.rule.groups.length, 1);
+assert.equal(extraVar.rule.groups[0].length, 3);
+assert.equal(check(extraVar, 'add', 1, 1).context, true);
 assert.equal(check(vars.find(r => r.line === 8), 'add', 1, 9).context, true);
 assert.equal(check(switches.find(r => r.line === 5), 'off').enter, true);
 assert.equal(check(switches.find(r => r.line === 5), 'on').leave, true);

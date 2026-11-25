@@ -14,6 +14,7 @@ const ROOM_TAG = '<RpgStudioRecallRoom>';
 const GALLERY_NAME = /回想|图鉴|圖鑑|画廊|鑑賞|鉴赏|gallery|recollection|memories|memory ?room|replay ?room/i;
 const CANCEL = /^(算了|取消|退出|返回|关闭|不看了|没事|不要|下次再说|nevermind|never mind|cancel|no|back|exit|quit|return|leave)[。.!！]?$/i;
 const choicecond = require('./choicecond.js');
+const { termsOf: pageTerms } = require('./page-conditions.js');
 // 复制到回想房时去掉的：传送、打开存档 / 游戏结束 / 回标题、暂时消除事件（会把入口消掉）
 const DROP = new Set([201, 214, 302, 352, 353, 354]);
 // 指向某个事件的指令：原地图上的第 N 号事件在回想房里不存在（或者是别的东西），这几条去掉；玩家（-1）和「本事件」（0）留着
@@ -144,8 +145,7 @@ function createGallery(project, xref, opts = {}) {
   }
 
   const isContent = pg => pg && (pg.list || []).filter(c => c && c.code !== 0).length > 0;
-  const condSwitches = c => [c.switch1Valid ? c.switch1Id : 0, c.switch2Valid ? c.switch2Id : 0].filter(Boolean);
-  const hasCond = c => !!(c && (c.switch1Valid || c.switch2Valid || c.variableValid || c.selfSwitchValid || c.itemValid || c.actorValid));
+  const hasCond = c => pageTerms(c).length > 0;
 
   // 开关在回想房以外哪里被打开
   //   脚本里提到这个开关的也算（可能是 setValue）；回想房自己里面打开的（「全解锁」之类）单独数
@@ -169,12 +169,21 @@ function createGallery(project, xref, opts = {}) {
     const firstText = (() => { const i = (pg.list || []).findIndex(x => x && x.code === 401); return i >= 0 ? String(pg.list[i].parameters[0] || '') : ''; })();
     const sw = new Map();
     const addSw = (id, on, from) => { if (!sw.has(id)) { const s = setters(id, galleryId); sw.set(id, { id, name: P.name('switch', id), on, from, setBy: s.outside, roomSet: s.room }); } };
-    for (const id of condSwitches(c)) addSw(id, true, 'page');
+    const terms = pageTerms(c);
+    for (const t of terms) if (t.kind === 'switch') addSw(t.id, true, 'page');
     for (const s of scenes) for (const n of s.needs || []) addSw(n.id, n.on, 'choice');
+    const variables = terms.filter(t => t.kind === 'var').map(t => ({ id: t.id, name: P.name('var', t.id), value: t.value }));
+    const other = [];
+    for (const t of terms) {
+      if (t.kind === 'selfSwitch') other.push('独立开关 ' + t.channel);
+      if (t.kind === 'item') other.push(P.label('item', t.id));
+      if (t.kind === 'actor') other.push(P.label('actor', t.id) + ' 在队伍');
+    }
     const unlock = {
       switches: [...sw.values()],
-      variable: c.variableValid ? { id: c.variableId, name: P.name('var', c.variableId), value: c.variableValue } : null,
-      other: [c.selfSwitchValid ? '独立开关 ' + c.selfSwitchCh : '', c.itemValid ? P.label('item', c.itemId) : '', c.actorValid ? P.label('actor', c.actorId) + ' 在队伍' : ''].filter(Boolean),
+      variable: variables[0] || null,
+      variables,
+      other,
       lockedPage: ci > 0 && hasCond(c) && !hasCond((pages[0] || {}).conditions) ? 0 : -1,
     };
     const neverOn = unlock.switches.filter(s => s.on && !s.setBy.length).map(s => s.id);
@@ -183,7 +192,7 @@ function createGallery(project, xref, opts = {}) {
     return {
       ev: e.id, name: e.name || '', x: e.x, y: e.y, page: ci, pages: pages.length, source: tag,
       image: pg.image || {}, title: firstText, scenes, unlock, neverOn,
-      open: !unlock.switches.length && !unlock.variable && !unlock.other.length,
+      open: !unlock.switches.length && !unlock.variables.length && !unlock.other.length,
       kind: real ? 'scene' : 'other',
     };
   }

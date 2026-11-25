@@ -737,8 +737,7 @@ function stagePlaceHtml() {
     <button type="button" class="small" id="cpGo">填进条件</button>
     <span class="faint cpnote">${m.type === 'switches' ? '用链上的开关' : '页条件只能写「≥」：放在某一段 = 从那段起都出现，直到后面的页盖过它'}</span></div>`;
 }
-// d = 弹窗，showRow / syncRows 是条件弹窗里的
-function bindStagePlace(d, showRow, syncRows) {
+function bindStagePlace(d, conditions) {
   const go = $('#cpGo', d);
   if (!go) return;
   const m = PROG.config.main;
@@ -746,15 +745,9 @@ function bindStagePlace(d, showRow, syncRows) {
     const seg = Number($('#cpSeg', d).value), slot = $('#cpSlot', d) ? Number($('#cpSlot', d).value) : -1;
     const keySw = new Set(m.type === 'switches' ? m.chain.map(c => c.switch) : (m.slots || []).map(s => s.switch));
     const want = m.type === 'switches' ? (seg > 0 ? m.chain[seg - 1].switch : 0) : slot >= 0 ? m.slots[slot].switch : 0;
-    // 开关：先拿掉原来的时段 / 链上的开关，再把要的放进空着的那一格
-    const slots = ['switch1', 'switch2'];
-    for (const k of slots) if ($('#c_' + k, d).checked && keySw.has(Number($('#v_' + k, d).value))) { $('#c_' + k, d).checked = false; $(`[data-row="${k}"]`, d).hidden = true; }
-    if (want) {
-      const k = slots.find(x => !$('#c_' + x, d).checked) || 'switch2';
-      $('#v_' + k, d).value = String(want); showRow(k);
-    }
-    if (m.type !== 'switches') { $('#v_variable', d).value = String(m.var); $('#v_value', d).value = String(m.segs[seg].from); showRow('variable'); }
-    syncRows();
+    conditions.remove('switch', id => id !== want && keySw.has(id));
+    if (want) conditions.add('switch', { id: want }, false);
+    if (m.type !== 'switches') conditions.add('var', { id: m.var, value: m.segs[seg].from }, false);
     toast('已按「' + progAxis().segs[seg] + (slot >= 0 ? ' · ' + m.slots[slot].label : '') + '」填好条件，保存后生效');
   };
 }

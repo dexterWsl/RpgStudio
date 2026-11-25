@@ -1,6 +1,6 @@
 'use strict';
 const animated = require('./animated-portrait.js');
-const installed = [animated, require('./layered-portrait.js'), require('./stage.js'), require('./map-effects.js'), require('./map-enemies.js'), require('./shop.js'), require('./directions.js'), require('./world-time.js'), require('./quests.js'), require('./variable-rules.js')];
+const installed = [animated, require('./layered-portrait.js'), require('./stage.js'), require('./map-effects.js'), require('./map-enemies.js'), require('./shop.js'), require('./directions.js'), require('./world-time.js'), require('./quests.js'), require('./variable-rules.js'), require('./page-conditions.js')];
 const library = [
   ['RpgStudio_AnimatedPortrait', '动态立绘', '在游戏画面内用画中画显示 Live2D 或视频，可框选范围、设置淡入淡出并随主角动作切换。', '#/plugins/market/RpgStudio_AnimatedPortrait'],
   ['RpgStudio_LayeredPortrait', '分层立绘', '在人物页拼接部位、组合表情，制作可用于剧情和画中画的立绘。', '#/people'],
@@ -12,6 +12,7 @@ const library = [
   ['RpgStudio_WorldTime', '世界时间', '游戏时钟和人物日程。', '#/people'],
   ['RpgStudio_Quests', '任务日志', '全局任务进度和游戏内日志。', '#/quests'],
   ['RpgStudio_VariableRules', '变量规则', '按步数或时间自动累计，以及变量组。', '#/names/var'],
+  ['RpgStudio_PageConditions', '事件页条件', '同时判断多个变量、开关、持有物品等出现条件。', ''],
 ];
 
 function cards(project) {

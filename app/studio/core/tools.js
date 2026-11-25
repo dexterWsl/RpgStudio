@@ -30,6 +30,7 @@ const stagePlugin = require('./stage.js');
 const mapEnemies = require('./map-enemies.js');
 const { isImmunityCommand } = require('./encounter-commands.js');
 const shop = require('./shop.js');
+const pageConditions = require('./page-conditions.js');
 
 // 编辑框里「■」结构行的文字（不能改的指令：选项开头、条件、循环、脚本、插件……）
 function anchorTextOf(describer) {
@@ -64,7 +65,7 @@ function eventLists(files, read) {
   for (const f of files) {
     const d = read(f);
     if (/^Map\d+\.json$/.test(f) && d) for (const e of d.events || []) for (const pg of (e && e.pages) || []) {
-      lists.push({ scope: f.slice(0, -5) + ':' + e.id, list: pg.list });
+      lists.push({ scope: f.slice(0, -5) + ':' + e.id, list: pg.list, conditions: pg.conditions });
     }
     if (f === 'CommonEvents.json' && Array.isArray(d)) for (const ce of d) if (ce) lists.push({ scope: 'ce:' + ce.id, list: ce.list });
     if (f === 'Troops.json' && Array.isArray(d)) for (const t of d) for (const pg of (t && t.pages) || []) {
@@ -117,6 +118,7 @@ function createTools(o) {
   };
   const prepare = (files, docs, include) => {
     const lists = eventLists(files, f => docs[f]);
+    if (lists.some(row => pageConditions.extraOf(row.conditions).length)) pageConditions.activate(o, include('System.json'));
     if (lists.some(({ list }) => list?.some(c => layeredCues.read(c) || c.code === 231 && layered.readPicture(c.parameters[1])))) layered.ensure(o);
     if (o.workDataDir?.() && lists.some(({ list }) => stagePlugin.wants(list))) include('System.json')[stagePlugin.KEY] = true;
     if (lists.some(({ list }) => list?.some(isImmunityCommand))) {

@@ -11,7 +11,7 @@ const path = require('path');
 const mapEffects = require('./map-effects.js');
 const variableRules = require('./variable-rules.js');
 const layered = require('./layered-portrait.js');
-const overlayPlugins = [require('./quests.js'), require('./world-time.js'), require('./map-enemies.js'), require('./shop.js'), require('./directions.js'), require('./stage.js'), layered, require('./animated-portrait.js')];
+const overlayPlugins = [require('./quests.js'), require('./world-time.js'), require('./map-enemies.js'), require('./shop.js'), require('./directions.js'), require('./stage.js'), layered, require('./animated-portrait.js'), require('./page-conditions.js')];
 
 const PLUGIN = 'RpgStudio_Playtest';
 const MIME = {

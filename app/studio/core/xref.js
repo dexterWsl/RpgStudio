@@ -7,6 +7,7 @@
 
 const { posix } = require('path');
 const impact = require('./impact.js');
+const { termsOf: pageTerms } = require('./page-conditions.js');
 const choicecond = require('./choicecond.js');
 const { parseCmd: parseStageCmd } = require('./stage.js');
 const { questsOf, readQuestInstruction } = require('./quests.js');
@@ -78,13 +79,13 @@ function createXref(project, describer) {
         }
       }
       // 出现条件
-      if (at.type === 'map' && (cond?.switch1Valid || cond?.switch2Valid || cond?.variableValid)) {
-        const pg = owner.pages[at.page];
-        addRule('page', -1, '出现条件 · ' + describer.pageConditions(cond).join(' 且 '), impact.pageTest(cond), { trigger: pg.trigger, preview: preview() });
-      }
-      if (at.type === 'map' && cond) {
-        if (cond.itemValid) add('item', cond.itemId, 'check', at, -1, '出现条件');
-        if (cond.actorValid) add('actor', cond.actorId, 'check', at, -1, '出现条件');
+      if (at.type === 'map') {
+        const terms = pageTerms(cond);
+        if (terms.some(t => t.kind === 'switch' || t.kind === 'var')) {
+          const pg = owner.pages[at.page];
+          addRule('page', -1, '出现条件 · ' + describer.pageConditions(cond).join(' 且 '), impact.pageTest(cond), { trigger: pg.trigger, preview: preview() });
+        }
+        for (const t of terms) if (t.kind === 'item' || t.kind === 'actor') add(t.kind, t.id, 'check', at, -1, '出现条件');
       }
       if (at.type === 'troop' && cond?.switchValid) {
         const groups = [[impact.switchTest(cond.switchId)]];

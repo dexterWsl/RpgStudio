@@ -9,6 +9,7 @@
 // 算法：每个事件按页的出现条件，算出每一段（× 每个时段）会显示哪一页——从最后一页往前找，
 //   条件全在进度轴上而且满足 = 一定显示；有轴以外的条件（别的开关、独立开关……）= 可能显示，接着往前找
 //   页里的「如果 变量 = N」分支也算进对应的段（按天派发的公共事件就是这样）
+const { termsOf: pageTerms } = require('./page-conditions.js');
 const CMP = ['=', '≥', '≤', '>', '<', '≠'];
 const NAME_DAY = /day|天|日(?!志)/i;
 const NAME_PROGRESS = /chapter|章|progress|进度|stage|story|主线|scenario|plot|route|quest|任务/i;
@@ -33,9 +34,13 @@ function createProgress(project, xref, opts = {}) {
     const W = id => { if (!sws.has(id)) sws.set(id, { id, pages: 0, branches: 0, on: 0 }); return sws.get(id); };
     xref.each((at, list, cond) => {
       if (at.type === 'troop') return;
-      if (cond) {
-        if (cond.variableValid) { const v = V(cond.variableId); v.pageGe.set(cond.variableValue, (v.pageGe.get(cond.variableValue) || 0) + 1); v.pages++; }
-        for (const k of ['switch1', 'switch2']) if (cond[k + 'Valid']) W(cond[k + 'Id']).pages++;
+      for (const t of pageTerms(cond)) {
+        if (t.kind === 'var') {
+          const v = V(t.id);
+          v.pageGe.set(t.value, (v.pageGe.get(t.value) || 0) + 1);
+          v.pages++;
+        }
+        if (t.kind === 'switch') W(t.id).pages++;
       }
       for (const c of list || []) {
         if (!c) continue;
@@ -182,19 +187,17 @@ function createProgress(project, xref, opts = {}) {
   function pageIn(ax, cond, seg, slot) {
     let res = 'yes', related = false;
     const and = r => { if (r === 'no') res = 'no'; else if (r === 'maybe' && res === 'yes') res = 'maybe'; };
-    if (!cond) return { res, related };
-    for (const k of ['switch1', 'switch2']) if (cond[k + 'Valid']) {
-      const sw = cond[k + 'Id'];
-      const si = slotIdx(ax, sw), ci = chainIdx(ax, sw);
-      if (si >= 0) { related = true; and(slot < 0 ? 'maybe' : si === slot ? 'yes' : 'no'); }
-      else if (ci >= 0) { related = true; and(ci < seg ? 'yes' : 'no'); }
-      else and('maybe');
+    for (const t of pageTerms(cond)) {
+      if (t.kind === 'switch') {
+        const si = slotIdx(ax, t.id), ci = chainIdx(ax, t.id);
+        if (si >= 0) { related = true; and(slot < 0 ? 'maybe' : si === slot ? 'yes' : 'no'); }
+        else if (ci >= 0) { related = true; and(ci < seg ? 'yes' : 'no'); }
+        else and('maybe');
+      } else if (t.kind === 'var' && ax.kind === 'var' && t.id === ax.var) {
+        related = true;
+        and(cmpIn(ax, seg, 1, t.value));
+      } else and('maybe');
     }
-    if (cond.variableValid) {
-      if (ax.kind === 'var' && cond.variableId === ax.var) { related = true; and(cmpIn(ax, seg, 1, cond.variableValue)); }
-      else and('maybe');
-    }
-    if (cond.selfSwitchValid || cond.itemValid || cond.actorValid) and('maybe');
     return { res, related };
   }
   const nCells = ax => ax.segs.length * Math.max(1, ax.slots.length);

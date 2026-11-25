@@ -7,6 +7,7 @@
 //   POST progress/start {type, count, …} 从零开始：建变量 / 时段开关 / 第 1~N 天（章）/ 开局设成 1 / 「过一天」场景
 const { need, int, blankPage, END } = require('../lib/util.js');
 const { MARK_CMD } = require('../core/scenes.js');
+const { extraOf, setExtra } = require('../core/page-conditions.js');
 
 module.exports = function (ctx) {
   const { project, where } = ctx;
@@ -36,6 +37,7 @@ module.exports = function (ctx) {
             const c = { ...e.pageCond };
             if (c.variableValid && ax.kind === 'var' && c.variableId === ax.var) c.variableValid = false;
             for (const k of ['switch1', 'switch2']) if (c[k + 'Valid'] && skip.has(c[k + 'Id'])) c[k + 'Valid'] = false;
+            setExtra(c, extraOf(c).filter(t => !(t.kind === 'var' && ax.kind === 'var' && t.id === ax.var) && !(t.kind === 'switch' && skip.has(t.id))));
             conds = T.describer.pageConditions(c);
           }
           const { pageCond, ...rest } = e;

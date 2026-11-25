@@ -4,6 +4,7 @@
 //   ctx 由 handler.js 组装：project / tools / where / hint / views（各模块互相用的视图）/ actions（全部 POST 动作）
 const { need, int, clone, END, blankPage } = require('../lib/util.js');
 const { ROOM_TAG } = require('../core/gallery.js');
+const { extraOf, setExtra } = require('../core/page-conditions.js');
 module.exports = function (ctx) {
   const { project, where, hint, tools, opts } = ctx;
   const V = ctx.views;
@@ -183,6 +184,10 @@ module.exports = function (ctx) {
             const c = pg.conditions || {};
             if (c.switch1Valid) { c.switch1Valid = false; n++; }
             if (c.switch2Valid) { c.switch2Valid = false; n++; }
+            const extra = extraOf(c);
+            const kept = extra.filter(t => t.kind !== 'switch');
+            n += extra.length - kept.length;
+            setExtra(c, kept);
             if (b.choices) for (const cmd of pg.list || []) {
               if (cmd.code === 102) { const before = JSON.stringify(cmd.parameters[0]); cmd.parameters[0] = (cmd.parameters[0] || []).map(stripChoiceCond); if (JSON.stringify(cmd.parameters[0]) !== before) n++; }
               if (cmd.code === 402) cmd.parameters[1] = stripChoiceCond(cmd.parameters[1]);

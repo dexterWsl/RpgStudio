@@ -1,6 +1,7 @@
 'use strict';
 
 const choicecond = require('./choicecond.js');
+const { termsOf: pageTerms } = require('./page-conditions.js');
 
 const ref = (kind, id) => ({ kind, id });
 const other = ref('other', 0);
@@ -19,11 +20,11 @@ function commandTest(p, describer) {
 }
 
 function pageTest(c) {
-  const terms = [];
-  if (c.switch1Valid) terms.push(switchTest(c.switch1Id));
-  if (c.switch2Valid) terms.push(switchTest(c.switch2Id));
-  if (c.variableValid) terms.push(varTest(c.variableId, '>=', c.variableValue));
-  if (c.selfSwitchValid || c.itemValid || c.actorValid) terms.push(unknownTest);
+  const terms = pageTerms(c).map(t => {
+    if (t.kind === 'switch') return switchTest(t.id);
+    if (t.kind === 'var') return varTest(t.id, '>=', t.value);
+    return unknownTest;
+  });
   return [terms];
 }
 

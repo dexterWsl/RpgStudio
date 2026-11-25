@@ -517,7 +517,6 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
   const c = pg.conditions;
   // 没勾的条件先藏起来，用「加条件」把要的那一种拿出来；勾上的照常显示
   const row = (key, label, inner) => `<div class="frow" data-row="${key}" ${c[key + 'Valid'] ? '' : 'hidden'}><input type="checkbox" id="c_${key}" ${c[key + 'Valid'] ? 'checked' : ''}><label for="c_${key}">${label}</label><div class="ins">${inner}</div></div>`;
-  const ADD = [['switch', '开关'], ['variable', '变量'], ['selfSwitch', '独立开关'], ['item', '持有物品'], ['actor', '角色在队伍']];
   const TR = ['按确定键', '玩家接触', '事件接触', '自动执行', '并行处理'], PR = ['在角色下方', '与角色同层', '在角色上方'];
   const r = await openDialog(`<header><h3>第 ${pageIndex + 1} 页：什么时候出现、怎么触发</h3></header>
     <div class="dbody">
@@ -528,7 +527,8 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
       ${row('selfSwitch', '独立开关', `<select id="v_self">${['A', 'B', 'C', 'D'].map(x => `<option ${c.selfSwitchCh === x ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="dim">为开</span>`)}
       ${row('item', '持有物品', `<select id="v_item">${options(it, c.itemId)}</select>`)}
       ${row('actor', '角色在队伍', `<select id="v_actor">${options(ac, c.actorId)}</select>`)}
-      <div class="addcond" id="addCond"><span class="dim">＋ 加条件</span>${ADD.map(([k, l]) => `<button type="button" class="small" data-add="${k}">${l}</button>`).join('')}</div>
+      <div class="page-extra-conditions" id="extraPageConditions"></div>
+      <div class="addcond"><span class="dim">＋ 加条件</span>${Object.entries(PAGE_CONDITION_FIELDS).map(([kind, { label }]) => `<button type="button" class="small" data-add="${kind}">${label}</button>`).join('')}</div>
       ${stagePlaceHtml()}
       ${(() => {
         const ps = (people || []).filter(p => p.vars.length || p.switches.length);
@@ -564,37 +564,17 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
     </div>
     <footer><span class="sp"></span><button data-x>取消</button><button class="primary" data-ok>保存条件</button></footer>`,
     (d, done) => {
-      $$('.frow select, .frow input:not([type=checkbox])', d).forEach(x => x.addEventListener('change', () => { const cb = $('input[type=checkbox]', x.closest('.frow')); if (cb) cb.checked = true; syncRows(); }));
-      // 条件行：勾上 / 加条件时显示；「加条件」只列还藏着的
-      const showRow = key => { const r = $(`[data-row="${key}"]`, d); r.hidden = false; $('#c_' + key, d).checked = true; syncRows(); };
-      const syncRows = () => {
-        const shown = k => !$(`[data-row="${k}"]`, d).hidden;
-        $$('[data-add]', d).forEach(b => { const k = b.dataset.add; b.hidden = k === 'switch' ? shown('switch1') && shown('switch2') : shown(k); });
-        $('#addCond', d).hidden = !$$('[data-add]', d).some(b => !b.hidden);
-        const n = $$('.frow input[type=checkbox]', d).filter(x => x.checked).length;
-        $('#cNone', d).hidden = n > 0; $('#cAnd', d).hidden = n < 2;
-      };
-      $$('[data-add]', d).forEach(b => b.onclick = () => {
-        const k = b.dataset.add;
-        const key = k === 'switch' ? ($(`[data-row="switch1"]`, d).hidden ? 'switch1' : 'switch2') : k;
-        showRow(key);
-        const f = $(`[data-row="${key}"] select`, d); if (f) f.focus();
-      });
-      $$('.frow input[type=checkbox]', d).forEach(x => x.addEventListener('change', syncRows));
+      const conditions = bindPageConditions(d, c, { switch: sw, var: vr, item: it, actor: ac });
       $('#v_trigger', d).onchange = () => { $('#autoNote', d).hidden = Number($('#v_trigger', d).value) !== 3; };
       $('#autoNote', d).hidden = pg.trigger !== 3;
-      syncRows();
-      bindStagePlace(d, showRow, syncRows);
+      bindStagePlace(d, conditions);
       $$('[data-cwho]', d).forEach(b => b.onclick = () => {
         $$('[data-cwho]', d).forEach(x => x.classList.toggle('on', x === b));
         $$('[data-cset]', d).forEach(x => { x.hidden = x.dataset.cset !== b.dataset.cwho; });
       });
       // 人物常用数值：点了直接填进条件
-      $$('[data-cvar]', d).forEach(b => b.onclick = () => { $('#v_variable', d).value = b.dataset.cvar; showRow('variable'); $('#v_value', d).focus(); $('#v_value', d).select(); });
-      $$('[data-csw]', d).forEach(b => b.onclick = () => {
-        const slot = !$('#c_switch1', d).checked || $('#v_switch1', d).value === b.dataset.csw ? 'switch1' : 'switch2';
-        $('#v_' + slot, d).value = b.dataset.csw; showRow(slot);
-      });
+      $$('[data-cvar]', d).forEach(b => b.onclick = () => conditions.add('var', { id: Number(b.dataset.cvar) }));
+      $$('[data-csw]', d).forEach(b => b.onclick = () => conditions.add('switch', { id: Number(b.dataset.csw) }));
       // 就地新建开关 / 变量（属于某人时名字存成「人名·名字」并手动关联），建好直接选上
       $('#cNewBtn', d).onclick = () => { const f = $('#cNewForm', d); f.hidden = !f.hidden; if (!f.hidden) $('#cnName', d).focus(); };
       if ((people || []).length) $('#cnWho', d).value = people[0].key;
@@ -607,15 +587,7 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
           const passive = kind === 'var' ? cnPassive?.value() : undefined;
           const x = who ? await api('person/newvar', { key: who, kind, label: nm, view: false, passive }) : await api('name', { kind, id: 'new', name: nm, passive });
           S.lookups = {};
-          // 新编号可能是列表里本来就有的空槽（没名字），改它的文字；超出原来数量的往后加
-          const putOpt = sel => { const o = [...sel.options].find(o => o.value === String(x.id)); if (o) o.textContent = x.id + ' ' + x.name; else sel.insertAdjacentHTML('beforeend', `<option value="${x.id}">${x.id} ${esc(x.name)}</option>`); };
-          if (kind === 'var') {
-            putOpt($('#v_variable', d)); $('#v_variable', d).value = String(x.id); showRow('variable');
-          } else {
-            for (const s of ['v_switch1', 'v_switch2']) putOpt($('#' + s, d));
-            const slot = !$('#c_switch1', d).checked ? 'switch1' : 'switch2';
-            $('#v_' + slot, d).value = String(x.id); showRow(slot);
-          }
+          conditions.addChoice(kind, x);
           $('#cnName', d).value = ''; $('#cNewForm', d).hidden = true;
           toast(`已新建${kind === 'var' ? '变量' : '开关'} ${x.id}「${x.name}」，已填进条件`);
         } catch (e) { $('#cErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }
@@ -645,25 +617,26 @@ async function conditionDialog(mapId, evId, pageIndex, pg, people) {
             variableValid: ck('c_variable'), variableId: Number(v('v_variable')), variableValue: Number(v('v_value')),
             selfSwitchValid: ck('c_selfSwitch'), selfSwitchCh: v('v_self'), itemValid: ck('c_item'), itemId: Number(v('v_item')),
             actorValid: ck('c_actor'), actorId: Number(v('v_actor')),
+            [EXTRA_PAGE_CONDITIONS]: conditions.extras(),
           },
         };
       };
       if (pg._image) image = pg._image;
       $('[data-x]', d).onclick = () => done(null);
       $('[data-ok]', d).onclick = async () => {
-        const v = id => $('#' + id, d).value, ck = id => $('#' + id, d).checked;
-        const body = {
-          map: mapId, ev: evId, page: pageIndex, trigger: Number(v('v_trigger')), priorityType: Number(v('v_prio')),
-          conditions: {
-            switch1Valid: ck('c_switch1'), switch1Id: Number(v('v_switch1')), switch2Valid: ck('c_switch2'), switch2Id: Number(v('v_switch2')),
-            variableValid: ck('c_variable'), variableId: Number(v('v_variable')), variableValue: Number(v('v_value')),
-            selfSwitchValid: ck('c_selfSwitch'), selfSwitchCh: v('v_self'), itemValid: ck('c_item'), itemId: Number(v('v_item')),
-            actorValid: ck('c_actor'), actorId: Number(v('v_actor')),
-          },
-        };
+        const body = { map: mapId, ev: evId, page: pageIndex, ...snapshot() };
         if (image) body.image = image;
-        try { await api('page/settings', body); done(true); }
-        catch (e) { $('#cErr', d).innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+        try {
+          if (body.conditions[EXTRA_PAGE_CONDITIONS].length && !pg.supportsExtraConditions) {
+            throw new Error('当前工作台服务需要重新启动才能保存追加条件。');
+          }
+          await api('page/settings', body);
+          done(true);
+        } catch (e) {
+          const error = $('#cErr', d);
+          error.innerHTML = `<div class="err" role="alert">${esc(e.message)}</div>`;
+          error.scrollIntoView({ block: 'nearest' });
+        }
       };
     });
   if (r && r.pick) {
