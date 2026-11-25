@@ -22,7 +22,7 @@ const ROOT = path.resolve(__dirname, '..');
 const NODE_VERSION = '22.23.4';
 const TARGET = 'win-x64';
 const KEEP_TOP = ['启动.cmd', '检查环境.cmd', '使用说明.txt'];
-const KEEP_OPTIONAL = ['README.md', 'LICENSE'];
+const KEEP_OPTIONAL = ['README.md', 'AGENTS.md', 'LICENSE'];
 
 // ---------- 参数 ----------
 const argv = process.argv.slice(2);
